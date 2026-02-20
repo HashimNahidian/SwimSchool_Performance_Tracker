@@ -139,6 +139,14 @@ class TemplateCreate(BaseModel):
     attribute_ids: list[int] = Field(min_length=1)
 
 
+class TemplateUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    level_id: int | None = None
+    skill_id: int | None = None
+    active: bool | None = None
+    attribute_ids: list[int] | None = Field(default=None, min_length=1)
+
+
 class TemplateAttributeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -538,18 +546,13 @@ def create_template(
         raise HTTPException(status_code=404, detail="Level not found")
     if payload.skill_id is not None and not db.get(models.Skill, payload.skill_id):
         raise HTTPException(status_code=404, detail="Skill not found")
-    attributes = list(db.scalars(select(models.Attribute).where(models.Attribute.id.in_(payload.attribute_ids))).all())
-    if len(attributes) != len(set(payload.attribute_ids)):
-        raise HTTPException(status_code=400, detail="One or more attribute_ids are invalid")
     template = models.Template(
         name=payload.name,
         level_id=payload.level_id,
         skill_id=payload.skill_id,
         active=payload.active,
     )
-    template.template_attributes = [
-        models.TemplateAttribute(attribute_id=attr_id, sort_order=idx + 1) for idx, attr_id in enumerate(payload.attribute_ids)
-    ]
+    replace_template_attributes(db, template, payload.attribute_ids)
     db.add(template)
     log_audit(db, manager.id, "CREATE", "template", details=payload.name)
     db.commit()
@@ -574,6 +577,38 @@ def list_templates(
     return list(db.scalars(stmt.order_by(models.Template.name)).unique().all())
 
 
+@app.patch("/templates/{template_id}", response_model=TemplateOut)
+def update_template(
+    template_id: int,
+    payload: TemplateUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    manager: Annotated[models.User, Depends(require_roles(models.UserRole.manager))],
+):
+    template = db.scalar(
+        select(models.Template)
+        .options(joinedload(models.Template.template_attributes))
+        .where(models.Template.id == template_id)
+    )
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    if "level_id" in data and data["level_id"] is not None and not db.get(models.Level, data["level_id"]):
+        raise HTTPException(status_code=404, detail="Level not found")
+    if "skill_id" in data and data["skill_id"] is not None and not db.get(models.Skill, data["skill_id"]):
+        raise HTTPException(status_code=404, detail="Skill not found")
+    attribute_ids = data.pop("attribute_ids", None)
+    for key, value in data.items():
+        setattr(template, key, value)
+    if attribute_ids is not None:
+        replace_template_attributes(db, template, attribute_ids)
+
+    log_audit(db, manager.id, "UPDATE", "template", entity_id=str(template.id))
+    db.commit()
+    db.refresh(template)
+    return template
+
+
 def resolve_template(db: Session, level_id: int | None, skill_id: int | None) -> models.Template | None:
     conditions = []
     if level_id is not None:
@@ -585,6 +620,17 @@ def resolve_template(db: Session, level_id: int | None, skill_id: int | None) ->
     if conditions:
         stmt = stmt.where(and_(*conditions))
     return db.scalar(stmt.order_by(models.Template.id.desc()))
+
+
+def replace_template_attributes(db: Session, template: models.Template, attribute_ids: list[int]) -> None:
+    attributes = list(db.scalars(select(models.Attribute).where(models.Attribute.id.in_(attribute_ids))).all())
+    if len(attributes) != len(set(attribute_ids)):
+        raise HTTPException(status_code=400, detail="One or more attribute_ids are invalid")
+    template.template_attributes.clear()
+    template.template_attributes.extend(
+        models.TemplateAttribute(attribute_id=attribute_id, sort_order=idx + 1)
+        for idx, attribute_id in enumerate(attribute_ids)
+    )
 
 
 def apply_evaluation_filters(

@@ -388,3 +388,35 @@ def test_instructor_supervisor_filter_and_trends(client: TestClient, db_session:
     assert len(trend_data) == 1
     assert trend_data[0]["period"] == "2026-02"
     assert trend_data[0]["average_rating"] == 3.0
+
+
+def test_manager_can_update_template_attributes_and_active_state(client: TestClient, db_session: Session):
+    create_user(db_session, "Manager", "manager4@test.local", models.UserRole.manager)
+    level = models.Level(name="Template Level", active=True)
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Template Skill", active=True)
+    db_session.add(skill)
+    db_session.flush()
+    attr_a = models.Attribute(name="Attr T A", description="a", active=True)
+    attr_b = models.Attribute(name="Attr T B", description="b", active=True)
+    db_session.add_all([attr_a, attr_b])
+    db_session.flush()
+
+    template = models.Template(name="Template To Update", level_id=level.id, skill_id=skill.id, active=True)
+    db_session.add(template)
+    db_session.flush()
+    db_session.add(models.TemplateAttribute(template_id=template.id, attribute_id=attr_a.id, sort_order=1))
+    db_session.commit()
+
+    headers = auth_headers(client, "manager4@test.local")
+    updated = client.patch(
+        f"/templates/{template.id}",
+        headers=headers,
+        json={"active": False, "attribute_ids": [attr_b.id]},
+    )
+    assert updated.status_code == 200
+    payload = updated.json()
+    assert payload["active"] is False
+    assert len(payload["template_attributes"]) == 1
+    assert payload["template_attributes"][0]["attribute_id"] == attr_b.id

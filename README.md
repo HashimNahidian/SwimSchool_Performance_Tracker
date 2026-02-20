@@ -90,7 +90,7 @@ docker compose -f infra/docker-compose.yml up -d
 - `POST /levels`, `PATCH /levels/{id}`, `GET /levels`
 - `POST /skills`, `PATCH /skills/{id}`, `GET /skills`
 - `POST /attributes`, `PATCH /attributes/{id}`, `GET /attributes`
-- `POST /templates`, `GET /templates`
+- `POST /templates`, `PATCH /templates/{id}`, `GET /templates`
 - `POST /evaluations/draft`
 - `PATCH /evaluations/{id}/draft`
 - `POST /evaluations/{id}/submit`
@@ -109,6 +109,7 @@ Evaluation listing/export query options:
 
 ## Notes
 - Frontend now includes a functional MVP for manager/supervisor/instructor flows.
+- Manager UI supports activate/deactivate controls for levels, skills, attributes, and templates.
 - `POST /auth/login` requires `email` + `password`.
 - Seeded login emails: `manager@propel.local`, `supervisor@propel.local`, `instructor1@propel.local`, `instructor2@propel.local`
 - Seeded password for all users: `Propel123!`

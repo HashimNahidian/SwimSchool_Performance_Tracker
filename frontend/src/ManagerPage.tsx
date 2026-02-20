@@ -88,6 +88,15 @@ export function ManagerPage() {
     await loadData();
   }
 
+  async function toggleLevel(level: Level) {
+    if (!token) return;
+    await apiRequest(`/levels/${level.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ active: !level.active })
+    }, token);
+    await loadData();
+  }
+
   async function createSkill(event: FormEvent) {
     event.preventDefault();
     if (!token || !skillLevelId) return;
@@ -96,6 +105,15 @@ export function ManagerPage() {
       body: JSON.stringify({ name: skillName, level_id: Number(skillLevelId), active: true })
     }, token);
     setSkillName("");
+    await loadData();
+  }
+
+  async function toggleSkill(skill: Skill) {
+    if (!token) return;
+    await apiRequest(`/skills/${skill.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ active: !skill.active })
+    }, token);
     await loadData();
   }
 
@@ -115,6 +133,15 @@ export function ManagerPage() {
     await loadData();
   }
 
+  async function toggleAttribute(attribute: Attribute) {
+    if (!token) return;
+    await apiRequest(`/attributes/${attribute.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ active: !attribute.active })
+    }, token);
+    await loadData();
+  }
+
   async function createTemplate(event: FormEvent) {
     event.preventDefault();
     if (!token || templateAttributeIds.length === 0) return;
@@ -130,6 +157,15 @@ export function ManagerPage() {
     }, token);
     setTemplateName("");
     setTemplateAttributeIds([]);
+    await loadData();
+  }
+
+  async function toggleTemplate(template: Template) {
+    if (!token) return;
+    await apiRequest(`/templates/${template.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ active: !template.active })
+    }, token);
     await loadData();
   }
 
@@ -170,7 +206,14 @@ export function ManagerPage() {
           />
           <button type="submit">Add Level</button>
         </form>
-        <ul>{levels.map((level) => <li key={level.id}>{level.name}</li>)}</ul>
+        <ul>
+          {levels.map((level) => (
+            <li key={level.id}>
+              {level.name} ({level.active ? "Active" : "Inactive"}){" "}
+              <button onClick={() => toggleLevel(level)}>{level.active ? "Deactivate" : "Activate"}</button>
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section className="panel">
@@ -195,7 +238,9 @@ export function ManagerPage() {
         <ul>
           {skills.map((skill) => (
             <li key={skill.id}>
-              {skill.name} ({levels.find((level) => level.id === skill.level_id)?.name ?? "Unknown level"})
+              {skill.name} ({levels.find((level) => level.id === skill.level_id)?.name ?? "Unknown level"}) -{" "}
+              {skill.active ? "Active" : "Inactive"}{" "}
+              <button onClick={() => toggleSkill(skill)}>{skill.active ? "Deactivate" : "Activate"}</button>
             </li>
           ))}
         </ul>
@@ -219,7 +264,10 @@ export function ManagerPage() {
         </form>
         <ul>
           {attributes.map((attribute) => (
-            <li key={attribute.id}>{attribute.name}</li>
+            <li key={attribute.id}>
+              {attribute.name} ({attribute.active ? "Active" : "Inactive"}){" "}
+              <button onClick={() => toggleAttribute(attribute)}>{attribute.active ? "Deactivate" : "Activate"}</button>
+            </li>
           ))}
         </ul>
       </section>
@@ -268,7 +316,9 @@ export function ManagerPage() {
         <ul>
           {templates.map((template) => (
             <li key={template.id}>
-              {template.name} - {template.template_attributes.length} attributes
+              {template.name} - {template.template_attributes.length} attributes -{" "}
+              {template.active ? "Active" : "Inactive"}{" "}
+              <button onClick={() => toggleTemplate(template)}>{template.active ? "Deactivate" : "Activate"}</button>
             </li>
           ))}
         </ul>
