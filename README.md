@@ -43,6 +43,11 @@ cd frontend
 npm install
 npm run dev
 ```
+7. Seed demo data (optional but recommended):
+```powershell
+cd backend
+python seed.py
+```
 
 ## Implemented Backend Scope
 - Role model: `MANAGER`, `SUPERVISOR`, `INSTRUCTOR`
@@ -74,3 +79,4 @@ npm run dev
 ## Notes
 - Frontend now includes a functional MVP for manager/supervisor/instructor flows.
 - `POST /auth/login` uses email-only identity for MVP bootstrap. Add password hashing + secure auth provider before production.
+- Seeded login emails: `manager@propel.local`, `supervisor@propel.local`, `instructor1@propel.local`, `instructor2@propel.local`
