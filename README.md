@@ -54,6 +54,21 @@ cd backend
 pytest -q
 ```
 
+## Containerized Run
+Run full stack (db + backend + frontend):
+```powershell
+docker compose -f infra/docker-compose.app.yml up --build
+```
+
+Endpoints:
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:8000`
+
+For DB-only local mode, keep using:
+```powershell
+docker compose -f infra/docker-compose.yml up -d
+```
+
 ## Implemented Backend Scope
 - Role model: `MANAGER`, `SUPERVISOR`, `INSTRUCTOR`
 - Core tables: users, levels, skills, attributes, templates, template_attributes, evaluations, evaluation_ratings, audit_logs
@@ -85,3 +100,4 @@ pytest -q
 - Frontend now includes a functional MVP for manager/supervisor/instructor flows.
 - `POST /auth/login` uses email-only identity for MVP bootstrap. Add password hashing + secure auth provider before production.
 - Seeded login emails: `manager@propel.local`, `supervisor@propel.local`, `instructor1@propel.local`, `instructor2@propel.local`
+- CI workflow is configured at `.github/workflows/ci.yml` and runs backend tests + frontend build on push/PR.
