@@ -98,6 +98,8 @@ docker compose -f infra/docker-compose.yml up -d
 - `GET /me/evaluations`
 - `GET /manager/evaluations`
 - `GET /supervisor/evaluations`
+- `GET /supervisors`
+- `GET /me/evaluations/trends`
 - `GET /exports/evaluations.csv`
 
 Evaluation listing/export query options:

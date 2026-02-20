@@ -205,6 +205,12 @@ class EvaluationOut(BaseModel):
     ratings: list[EvaluationRatingOut]
 
 
+class TrendPoint(BaseModel):
+    period: str
+    evaluation_count: int
+    average_rating: float
+
+
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
 
@@ -367,6 +373,15 @@ def list_instructors(
     _: Annotated[models.User, Depends(require_roles(models.UserRole.manager, models.UserRole.supervisor))],
 ):
     stmt = select(models.User).where(models.User.role == models.UserRole.instructor, models.User.active == True)  # noqa: E712
+    return list(db.scalars(stmt.order_by(models.User.name)).all())
+
+
+@app.get("/supervisors", response_model=list[UserOut])
+def list_supervisors(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[models.User, Depends(get_current_user)],
+):
+    stmt = select(models.User).where(models.User.role == models.UserRole.supervisor, models.User.active == True)  # noqa: E712
     return list(db.scalars(stmt.order_by(models.User.name)).all())
 
 
@@ -732,6 +747,7 @@ def list_my_evaluations(
     date_to: date | None = None,
     level_id: int | None = None,
     skill_id: int | None = None,
+    supervisor_id: int | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     sort_by: str = Query(default="session_date"),
@@ -748,10 +764,58 @@ def list_my_evaluations(
         date_to=date_to,
         level_id=level_id,
         skill_id=skill_id,
+        supervisor_id=supervisor_id,
         status_filter=models.EvaluationStatus.submitted,
     )
     stmt = apply_evaluation_sort(stmt, sort_by=sort_by, sort_dir=sort_dir)
     return list(db.scalars(stmt.offset(offset).limit(limit)).unique().all())
+
+
+@app.get("/me/evaluations/trends", response_model=list[TrendPoint])
+def my_evaluation_trends(
+    db: Annotated[Session, Depends(get_db)],
+    instructor: Annotated[models.User, Depends(require_roles(models.UserRole.instructor))],
+    date_from: date | None = None,
+    date_to: date | None = None,
+    level_id: int | None = None,
+    skill_id: int | None = None,
+    supervisor_id: int | None = None,
+):
+    stmt = (
+        select(models.Evaluation)
+        .options(joinedload(models.Evaluation.ratings))
+        .where(models.Evaluation.instructor_id == instructor.id, models.Evaluation.status == models.EvaluationStatus.submitted)
+    )
+    stmt = apply_evaluation_filters(
+        stmt,
+        date_from=date_from,
+        date_to=date_to,
+        level_id=level_id,
+        skill_id=skill_id,
+        supervisor_id=supervisor_id,
+        status_filter=models.EvaluationStatus.submitted,
+    )
+    evaluations = list(db.scalars(stmt).unique().all())
+
+    period_totals: dict[str, float] = {}
+    period_counts: dict[str, int] = {}
+    for evaluation in evaluations:
+        if not evaluation.ratings:
+            continue
+        period = evaluation.session_date.strftime("%Y-%m")
+        avg_for_eval = sum(r.rating_value for r in evaluation.ratings) / len(evaluation.ratings)
+        period_totals[period] = period_totals.get(period, 0.0) + avg_for_eval
+        period_counts[period] = period_counts.get(period, 0) + 1
+
+    trends = [
+        TrendPoint(
+            period=period,
+            evaluation_count=period_counts[period],
+            average_rating=round(period_totals[period] / period_counts[period], 2),
+        )
+        for period in sorted(period_totals.keys())
+    ]
+    return trends
 
 
 @app.get("/manager/evaluations", response_model=list[EvaluationOut])

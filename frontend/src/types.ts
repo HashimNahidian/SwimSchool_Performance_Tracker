@@ -63,6 +63,12 @@ export interface Evaluation {
   ratings: EvaluationRating[];
 }
 
+export interface TrendPoint {
+  period: string;
+  evaluation_count: number;
+  average_rating: number;
+}
+
 export interface LoginResponse {
   access_token: string;
   token_type: string;

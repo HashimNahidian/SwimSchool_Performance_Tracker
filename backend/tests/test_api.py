@@ -330,3 +330,61 @@ def test_manager_evaluations_support_pagination_sort_and_filters(client: TestCli
     csv_data = export.text
     assert "Eval 1" in csv_data
     assert "Eval 2" not in csv_data
+
+
+def test_instructor_supervisor_filter_and_trends(client: TestClient, db_session: Session):
+    create_user(db_session, "Manager", "manager3@test.local", models.UserRole.manager)
+    supervisor_a = create_user(db_session, "Supervisor A", "supervisorA@test.local", models.UserRole.supervisor)
+    supervisor_b = create_user(db_session, "Supervisor B", "supervisorB@test.local", models.UserRole.supervisor)
+    instructor = create_user(db_session, "Instructor", "instructor3@test.local", models.UserRole.instructor)
+
+    level = models.Level(name="Level Trend", active=True)
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Skill Trend", active=True)
+    db_session.add(skill)
+    db_session.flush()
+    attr = models.Attribute(name="Attr Trend", description="desc", active=True)
+    db_session.add(attr)
+    db_session.flush()
+
+    ev_a = models.Evaluation(
+        instructor_id=instructor.id,
+        supervisor_id=supervisor_a.id,
+        level_id=level.id,
+        skill_id=skill.id,
+        session_label="Trend A",
+        session_date=date(2026, 2, 1),
+        notes="A",
+        status=models.EvaluationStatus.submitted,
+        submitted_at=datetime.now(timezone.utc),
+    )
+    ev_a.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=3)]
+    ev_b = models.Evaluation(
+        instructor_id=instructor.id,
+        supervisor_id=supervisor_b.id,
+        level_id=level.id,
+        skill_id=skill.id,
+        session_label="Trend B",
+        session_date=date(2026, 2, 10),
+        notes="B",
+        status=models.EvaluationStatus.submitted,
+        submitted_at=datetime.now(timezone.utc),
+    )
+    ev_b.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=1)]
+    db_session.add_all([ev_a, ev_b])
+    db_session.commit()
+
+    headers = auth_headers(client, "instructor3@test.local")
+    filtered = client.get(f"/me/evaluations?supervisor_id={supervisor_a.id}", headers=headers)
+    assert filtered.status_code == 200
+    payload = filtered.json()
+    assert len(payload) == 1
+    assert payload[0]["session_label"] == "Trend A"
+
+    trends = client.get(f"/me/evaluations/trends?supervisor_id={supervisor_a.id}", headers=headers)
+    assert trends.status_code == 200
+    trend_data = trends.json()
+    assert len(trend_data) == 1
+    assert trend_data[0]["period"] == "2026-02"
+    assert trend_data[0]["average_rating"] == 3.0

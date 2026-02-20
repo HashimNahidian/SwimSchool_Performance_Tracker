@@ -2,28 +2,33 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiRequest } from "./api";
 import { useAuth } from "./auth";
-import type { Evaluation, Level, Skill } from "./types";
+import type { Evaluation, Level, Skill, TrendPoint, User } from "./types";
 
 export function InstructorPage() {
   const { token } = useAuth();
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [supervisors, setSupervisors] = useState<User[]>([]);
+  const [trends, setTrends] = useState<TrendPoint[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [levelId, setLevelId] = useState("");
   const [skillId, setSkillId] = useState("");
+  const [supervisorId, setSupervisorId] = useState("");
 
   async function loadLookups() {
     if (!token) return;
-    const [levelsData, skillsData] = await Promise.all([
+    const [levelsData, skillsData, supervisorsData] = await Promise.all([
       apiRequest<Level[]>("/levels", {}, token),
-      apiRequest<Skill[]>("/skills", {}, token)
+      apiRequest<Skill[]>("/skills", {}, token),
+      apiRequest<User[]>("/supervisors", {}, token)
     ]);
     setLevels(levelsData);
     setSkills(skillsData);
+    setSupervisors(supervisorsData);
   }
 
   async function loadEvaluations(event?: FormEvent) {
@@ -35,9 +40,14 @@ export function InstructorPage() {
       if (dateTo) params.set("date_to", dateTo);
       if (levelId) params.set("level_id", levelId);
       if (skillId) params.set("skill_id", skillId);
+      if (supervisorId) params.set("supervisor_id", supervisorId);
       const query = params.toString();
-      const data = await apiRequest<Evaluation[]>(`/me/evaluations${query ? `?${query}` : ""}`, {}, token);
+      const [data, trendData] = await Promise.all([
+        apiRequest<Evaluation[]>(`/me/evaluations${query ? `?${query}` : ""}`, {}, token),
+        apiRequest<TrendPoint[]>(`/me/evaluations/trends${query ? `?${query}` : ""}`, {}, token)
+      ]);
       setEvaluations(data);
+      setTrends(trendData);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -74,6 +84,14 @@ export function InstructorPage() {
               </option>
             ))}
           </select>
+          <select value={supervisorId} onChange={(e) => setSupervisorId(e.target.value)}>
+            <option value="">All supervisors</option>
+            {supervisors.map((supervisor) => (
+              <option key={supervisor.id} value={supervisor.id}>
+                {supervisor.name}
+              </option>
+            ))}
+          </select>
           <button type="submit">Apply</button>
         </form>
       </section>
@@ -100,6 +118,28 @@ export function InstructorPage() {
                 <td>
                   <Link to={`/evaluations/${evaluation.id}`}>Details</Link>
                 </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="panel">
+        <h3>Trend Analytics</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Period</th>
+              <th>Evaluations</th>
+              <th>Avg Rating</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trends.map((trend) => (
+              <tr key={trend.period}>
+                <td>{trend.period}</td>
+                <td>{trend.evaluation_count}</td>
+                <td>{trend.average_rating.toFixed(2)}</td>
               </tr>
             ))}
           </tbody>
