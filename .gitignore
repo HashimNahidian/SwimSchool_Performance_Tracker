@@ -11,4 +11,16 @@ __pycache__/
 # Env files
 .env
 .env.*
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+!infra/.env.prod.example
+
+# Frontend build artifacts
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Backups
+backups/
 
