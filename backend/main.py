@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 
 import models
 from db import get_db
+from security import hash_password, verify_password
 
 app = FastAPI(title="Propel Swim Evaluation API", version="1.0.0")
 
@@ -26,6 +27,7 @@ ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("ACCESS_TOKEN_EXPIRE_HOURS", "8"))
 class UserCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=8, max_length=128)
     role: models.UserRole
     active: bool = True
 
@@ -42,6 +44,7 @@ class UserOut(BaseModel):
 
 class LoginRequest(BaseModel):
     email: str
+    password: str = Field(min_length=8, max_length=128)
 
 
 class TokenResponse(BaseModel):
@@ -282,7 +285,7 @@ def health():
 @app.post("/auth/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Annotated[Session, Depends(get_db)]):
     user = db.scalar(select(models.User).where(models.User.email == payload.email))
-    if not user or not user.active:
+    if not user or not user.active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid login")
     token = create_access_token(user.id, user.role)
     return TokenResponse(access_token=token, user=user)
@@ -297,7 +300,8 @@ def create_user(
     existing = db.scalar(select(models.User).where(models.User.email == payload.email))
     if existing:
         raise HTTPException(status_code=400, detail="Email already exists")
-    user = models.User(**payload.model_dump())
+    data = payload.model_dump(exclude={"password"})
+    user = models.User(**data, password_hash=hash_password(payload.password))
     db.add(user)
     db.commit()
     db.refresh(user)

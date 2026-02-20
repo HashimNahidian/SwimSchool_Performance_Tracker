@@ -5,6 +5,7 @@ import { useAuth } from "./auth";
 export function LoginPage() {
   const { login, user } = useAuth();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -17,7 +18,7 @@ export function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await login(email);
+      await login(email, password);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -38,6 +39,16 @@ export function LoginPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="manager@propel.local"
+          />
+        </label>
+        <label>
+          Password
+          <input
+            type="password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Propel123!"
           />
         </label>
         <button type="submit" disabled={loading}>

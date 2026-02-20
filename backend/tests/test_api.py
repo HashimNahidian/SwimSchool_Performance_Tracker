@@ -13,6 +13,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import main
 import models
 from db import Base
+from security import hash_password
 
 
 TEST_DATABASE_URL = "sqlite+pysqlite:///:memory:"
@@ -47,7 +48,13 @@ def client(db_session: Session) -> TestClient:
 
 
 def create_user(db: Session, name: str, email: str, role: models.UserRole) -> models.User:
-    user = models.User(name=name, email=email, role=role, active=True)
+    user = models.User(
+        name=name,
+        email=email,
+        password_hash=hash_password("TestPass123!"),
+        role=role,
+        active=True,
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -55,7 +62,7 @@ def create_user(db: Session, name: str, email: str, role: models.UserRole) -> mo
 
 
 def auth_headers(client: TestClient, email: str) -> dict[str, str]:
-    response = client.post("/auth/login", json={"email": email})
+    response = client.post("/auth/login", json={"email": email, "password": "TestPass123!"})
     assert response.status_code == 200
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}

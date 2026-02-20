@@ -26,6 +26,7 @@ DATABASE_URL=postgresql+psycopg2://propel:propelpass@localhost:5432/propel_eval
 SECRET_KEY=replace-with-a-random-secret
 SQL_ECHO=false
 ACCESS_TOKEN_EXPIRE_HOURS=8
+PASSWORD_HASH_ITERATIONS=390000
 ```
 4. Run migrations:
 ```powershell
@@ -81,7 +82,7 @@ docker compose -f infra/docker-compose.yml up -d
 
 ## Important API Endpoints
 - `POST /auth/login`
-- `POST /users` (manager-only)
+- `POST /users` (manager-only, includes `password`)
 - `GET /instructors` (manager + supervisor)
 - `POST /levels`, `PATCH /levels/{id}`, `GET /levels`
 - `POST /skills`, `PATCH /skills/{id}`, `GET /skills`
@@ -98,6 +99,7 @@ docker compose -f infra/docker-compose.yml up -d
 
 ## Notes
 - Frontend now includes a functional MVP for manager/supervisor/instructor flows.
-- `POST /auth/login` uses email-only identity for MVP bootstrap. Add password hashing + secure auth provider before production.
+- `POST /auth/login` requires `email` + `password`.
 - Seeded login emails: `manager@propel.local`, `supervisor@propel.local`, `instructor1@propel.local`, `instructor2@propel.local`
+- Seeded password for all users: `Propel123!`
 - CI workflow is configured at `.github/workflows/ci.yml` and runs backend tests + frontend build on push/PR.

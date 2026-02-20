@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 import models
 from db import SessionLocal
+from security import hash_password
 
 
 def get_or_create_user(
@@ -14,6 +15,7 @@ def get_or_create_user(
     *,
     name: str,
     email: str,
+    password: str,
     role: models.UserRole,
     active: bool = True,
 ) -> models.User:
@@ -22,8 +24,15 @@ def get_or_create_user(
         user.name = name
         user.role = role
         user.active = active
+        user.password_hash = hash_password(password)
         return user
-    user = models.User(name=name, email=email, role=role, active=active)
+    user = models.User(
+        name=name,
+        email=email,
+        password_hash=hash_password(password),
+        role=role,
+        active=active,
+    )
     db.add(user)
     db.flush()
     return user
@@ -106,24 +115,28 @@ def seed() -> None:
             db,
             name="Mia Manager",
             email="manager@propel.local",
+            password="Propel123!",
             role=models.UserRole.manager,
         )
         supervisor = get_or_create_user(
             db,
             name="Sam Supervisor",
             email="supervisor@propel.local",
+            password="Propel123!",
             role=models.UserRole.supervisor,
         )
         instructor_1 = get_or_create_user(
             db,
             name="Ivy Instructor",
             email="instructor1@propel.local",
+            password="Propel123!",
             role=models.UserRole.instructor,
         )
         instructor_2 = get_or_create_user(
             db,
             name="Ian Instructor",
             email="instructor2@propel.local",
+            password="Propel123!",
             role=models.UserRole.instructor,
         )
 
@@ -222,6 +235,7 @@ def seed() -> None:
     print("- supervisor@propel.local")
     print("- instructor1@propel.local")
     print("- instructor2@propel.local")
+    print("Seed password for all users: Propel123!")
 
 
 if __name__ == "__main__":
