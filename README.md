@@ -48,6 +48,11 @@ npm run dev
 cd backend
 python seed.py
 ```
+8. Run backend tests:
+```powershell
+cd backend
+pytest -q
+```
 
 ## Implemented Backend Scope
 - Role model: `MANAGER`, `SUPERVISOR`, `INSTRUCTOR`
