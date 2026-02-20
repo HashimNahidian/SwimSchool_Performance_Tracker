@@ -316,6 +316,15 @@ def list_users(
     return list(db.scalars(stmt.order_by(models.User.name)).all())
 
 
+@app.get("/instructors", response_model=list[UserOut])
+def list_instructors(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[models.User, Depends(require_roles(models.UserRole.manager, models.UserRole.supervisor))],
+):
+    stmt = select(models.User).where(models.User.role == models.UserRole.instructor, models.User.active == True)  # noqa: E712
+    return list(db.scalars(stmt.order_by(models.User.name)).all())
+
+
 @app.post("/levels", response_model=LevelOut)
 def create_level(
     payload: LevelCreate,
@@ -676,6 +685,22 @@ def manager_list_evaluations(
         stmt = stmt.where(models.Evaluation.supervisor_id == supervisor_id)
     if instructor_id:
         stmt = stmt.where(models.Evaluation.instructor_id == instructor_id)
+    if status_filter:
+        stmt = stmt.where(models.Evaluation.status == status_filter)
+    return list(db.scalars(stmt.order_by(models.Evaluation.created_at.desc())).unique().all())
+
+
+@app.get("/supervisor/evaluations", response_model=list[EvaluationOut])
+def supervisor_list_evaluations(
+    db: Annotated[Session, Depends(get_db)],
+    supervisor: Annotated[models.User, Depends(require_roles(models.UserRole.supervisor))],
+    status_filter: models.EvaluationStatus | None = Query(default=None, alias="status"),
+):
+    stmt = (
+        select(models.Evaluation)
+        .options(joinedload(models.Evaluation.ratings))
+        .where(models.Evaluation.supervisor_id == supervisor.id)
+    )
     if status_filter:
         stmt = stmt.where(models.Evaluation.status == status_filter)
     return list(db.scalars(stmt.order_by(models.Evaluation.created_at.desc())).unique().all())

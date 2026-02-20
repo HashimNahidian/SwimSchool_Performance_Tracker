@@ -37,6 +37,12 @@ alembic upgrade head
 cd backend
 uvicorn main:app --reload
 ```
+6. Start frontend:
+```powershell
+cd frontend
+npm install
+npm run dev
+```
 
 ## Implemented Backend Scope
 - Role model: `MANAGER`, `SUPERVISOR`, `INSTRUCTOR`
@@ -51,6 +57,7 @@ uvicorn main:app --reload
 ## Important API Endpoints
 - `POST /auth/login`
 - `POST /users` (manager-only)
+- `GET /instructors` (manager + supervisor)
 - `POST /levels`, `PATCH /levels/{id}`, `GET /levels`
 - `POST /skills`, `PATCH /skills/{id}`, `GET /skills`
 - `POST /attributes`, `PATCH /attributes/{id}`, `GET /attributes`
@@ -61,8 +68,9 @@ uvicorn main:app --reload
 - `GET /evaluations/{id}`
 - `GET /me/evaluations`
 - `GET /manager/evaluations`
+- `GET /supervisor/evaluations`
 - `GET /exports/evaluations.csv`
 
 ## Notes
-- This repository currently contains backend implementation only; frontend is still scaffold-only.
+- Frontend now includes a functional MVP for manager/supervisor/instructor flows.
 - `POST /auth/login` uses email-only identity for MVP bootstrap. Add password hashing + secure auth provider before production.
