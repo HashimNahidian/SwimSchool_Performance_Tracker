@@ -7,8 +7,18 @@ DATABASE_URL = os.getenv(
     "postgresql+psycopg2://propel:propelpass@localhost:5432/propel_eval",
 )
 
-engine = create_engine(DATABASE_URL, echo=True)
+SQL_ECHO = os.getenv("SQL_ECHO", "false").lower() == "true"
+
+engine = create_engine(DATABASE_URL, echo=SQL_ECHO)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 class Base(DeclarativeBase):
     pass
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
