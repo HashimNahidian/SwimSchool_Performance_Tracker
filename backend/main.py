@@ -5,10 +5,12 @@ import hmac
 import io
 import json
 import os
+import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, asc, desc, select
@@ -22,6 +24,22 @@ app = FastAPI(title="Propel Swim Evaluation API", version="1.0.0")
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
 ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("ACCESS_TOKEN_EXPIRE_HOURS", "8"))
+LOGIN_RATE_LIMIT_MAX_ATTEMPTS = int(os.getenv("LOGIN_RATE_LIMIT_MAX_ATTEMPTS", "10"))
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "60"))
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+    if origin.strip()
+]
+_login_attempt_timestamps: dict[str, list[float]] = {}
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class UserCreate(BaseModel):
@@ -272,6 +290,28 @@ def _replace_ratings(db: Session, evaluation: models.Evaluation, ratings: list[R
     )
 
 
+def get_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def enforce_login_rate_limit(client_ip: str) -> None:
+    now = time.time()
+    window_start = now - LOGIN_RATE_LIMIT_WINDOW_SECONDS
+    timestamps = [ts for ts in _login_attempt_timestamps.get(client_ip, []) if ts >= window_start]
+    if len(timestamps) >= LOGIN_RATE_LIMIT_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Please try again later.",
+        )
+    timestamps.append(now)
+    _login_attempt_timestamps[client_ip] = timestamps
+
+
 @app.get("/")
 def root():
     return {"ok": True}
@@ -283,7 +323,8 @@ def health():
 
 
 @app.post("/auth/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Annotated[Session, Depends(get_db)]):
+def login(payload: LoginRequest, request: Request, db: Annotated[Session, Depends(get_db)]):
+    enforce_login_rate_limit(get_client_ip(request))
     user = db.scalar(select(models.User).where(models.User.email == payload.email))
     if not user or not user.active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid login")

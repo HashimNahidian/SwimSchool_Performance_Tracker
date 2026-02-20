@@ -68,6 +68,17 @@ def auth_headers(client: TestClient, email: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+@pytest.fixture(autouse=True)
+def reset_login_rate_limit():
+    main._login_attempt_timestamps.clear()
+    original_max = main.LOGIN_RATE_LIMIT_MAX_ATTEMPTS
+    original_window = main.LOGIN_RATE_LIMIT_WINDOW_SECONDS
+    yield
+    main._login_attempt_timestamps.clear()
+    main.LOGIN_RATE_LIMIT_MAX_ATTEMPTS = original_max
+    main.LOGIN_RATE_LIMIT_WINDOW_SECONDS = original_window
+
+
 def test_manager_only_endpoint_rejects_supervisor(client: TestClient, db_session: Session):
     create_user(db_session, "Manager", "manager@test.local", models.UserRole.manager)
     create_user(db_session, "Supervisor", "supervisor@test.local", models.UserRole.supervisor)
@@ -79,6 +90,20 @@ def test_manager_only_endpoint_rejects_supervisor(client: TestClient, db_session
     manager_headers = auth_headers(client, "manager@test.local")
     success = client.post("/levels", headers=manager_headers, json={"name": "Beginner", "active": True})
     assert success.status_code == 200
+
+
+def test_login_rate_limit_blocks_excessive_attempts(client: TestClient, db_session: Session):
+    create_user(db_session, "Manager", "manager-rate@test.local", models.UserRole.manager)
+    main.LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 2
+    main.LOGIN_RATE_LIMIT_WINDOW_SECONDS = 60
+    headers = {"X-Forwarded-For": "1.2.3.4"}
+
+    invalid_1 = client.post("/auth/login", headers=headers, json={"email": "manager-rate@test.local", "password": "bad-pass"})
+    assert invalid_1.status_code == 401
+    invalid_2 = client.post("/auth/login", headers=headers, json={"email": "manager-rate@test.local", "password": "bad-pass"})
+    assert invalid_2.status_code == 401
+    blocked = client.post("/auth/login", headers=headers, json={"email": "manager-rate@test.local", "password": "TestPass123!"})
+    assert blocked.status_code == 429
 
 
 def test_supervisor_submit_flow_and_instructor_visibility(client: TestClient, db_session: Session):
