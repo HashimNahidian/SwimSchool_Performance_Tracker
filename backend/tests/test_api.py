@@ -244,3 +244,64 @@ def test_manager_csv_export_returns_data(client: TestClient, db_session: Session
     body = export_response.text
     assert "evaluation_id" in body
     assert "Export Session" in body
+
+
+def test_manager_evaluations_support_pagination_sort_and_filters(client: TestClient, db_session: Session):
+    manager = create_user(db_session, "Manager", "manager2@test.local", models.UserRole.manager)
+    supervisor = create_user(db_session, "Supervisor", "supervisor2@test.local", models.UserRole.supervisor)
+    instructor = create_user(db_session, "Instructor", "instructor2@test.local", models.UserRole.instructor)
+
+    level = models.Level(name="Level A", active=True)
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Skill A", active=True)
+    db_session.add(skill)
+    db_session.flush()
+    attr = models.Attribute(name="Attr A", description="desc", active=True)
+    db_session.add(attr)
+    db_session.flush()
+
+    ev1 = models.Evaluation(
+        instructor_id=instructor.id,
+        supervisor_id=supervisor.id,
+        level_id=level.id,
+        skill_id=skill.id,
+        session_label="Eval 1",
+        session_date=date(2026, 1, 10),
+        notes="older",
+        status=models.EvaluationStatus.submitted,
+        submitted_at=datetime.now(timezone.utc),
+    )
+    ev1.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=2)]
+    ev2 = models.Evaluation(
+        instructor_id=instructor.id,
+        supervisor_id=supervisor.id,
+        level_id=level.id,
+        skill_id=skill.id,
+        session_label="Eval 2",
+        session_date=date(2026, 1, 20),
+        notes="newer",
+        status=models.EvaluationStatus.draft,
+    )
+    ev2.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=3)]
+    db_session.add_all([ev1, ev2])
+    db_session.commit()
+
+    manager_headers = auth_headers(client, "manager2@test.local")
+    response = client.get(
+        "/manager/evaluations?status=SUBMITTED&sort_by=session_date&sort_dir=asc&limit=1&offset=0",
+        headers=manager_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["session_label"] == "Eval 1"
+
+    export = client.get(
+        "/exports/evaluations.csv?status=SUBMITTED&sort_by=session_date&sort_dir=asc",
+        headers=manager_headers,
+    )
+    assert export.status_code == 200
+    csv_data = export.text
+    assert "Eval 1" in csv_data
+    assert "Eval 2" not in csv_data

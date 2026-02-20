@@ -97,6 +97,11 @@ docker compose -f infra/docker-compose.yml up -d
 - `GET /supervisor/evaluations`
 - `GET /exports/evaluations.csv`
 
+Evaluation listing/export query options:
+- Filters: `date_from`, `date_to`, `level_id`, `skill_id`, `supervisor_id`, `instructor_id`, `status`
+- Pagination: `limit`, `offset` (list endpoints)
+- Sorting: `sort_by` in (`id`, `created_at`, `session_date`, `submitted_at`, `status`) and `sort_dir` in (`asc`, `desc`)
+
 ## Notes
 - Frontend now includes a functional MVP for manager/supervisor/instructor flows.
 - `POST /auth/login` requires `email` + `password`.

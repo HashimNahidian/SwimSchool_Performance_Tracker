@@ -22,6 +22,32 @@ export function ManagerPage() {
   const [templateLevelId, setTemplateLevelId] = useState("");
   const [templateSkillId, setTemplateSkillId] = useState("");
   const [templateAttributeIds, setTemplateAttributeIds] = useState<number[]>([]);
+  const [evalDateFrom, setEvalDateFrom] = useState("");
+  const [evalDateTo, setEvalDateTo] = useState("");
+  const [evalStatus, setEvalStatus] = useState("");
+  const [evalInstructorId, setEvalInstructorId] = useState("");
+  const [evalSupervisorId, setEvalSupervisorId] = useState("");
+  const [evalSortBy, setEvalSortBy] = useState("created_at");
+  const [evalSortDir, setEvalSortDir] = useState("desc");
+  const [evalLimit, setEvalLimit] = useState(25);
+  const [evalOffset, setEvalOffset] = useState(0);
+
+  function buildEvalQuery(includePagination: boolean): string {
+    const params = new URLSearchParams();
+    if (evalDateFrom) params.set("date_from", evalDateFrom);
+    if (evalDateTo) params.set("date_to", evalDateTo);
+    if (evalStatus) params.set("status", evalStatus);
+    if (evalInstructorId) params.set("instructor_id", evalInstructorId);
+    if (evalSupervisorId) params.set("supervisor_id", evalSupervisorId);
+    params.set("sort_by", evalSortBy);
+    params.set("sort_dir", evalSortDir);
+    if (includePagination) {
+      params.set("limit", String(evalLimit));
+      params.set("offset", String(evalOffset));
+    }
+    const query = params.toString();
+    return query ? `?${query}` : "";
+  }
 
   async function loadData() {
     if (!token) return;
@@ -32,7 +58,7 @@ export function ManagerPage() {
           apiRequest<Skill[]>("/skills", {}, token),
           apiRequest<Attribute[]>("/attributes", {}, token),
           apiRequest<Template[]>("/templates", {}, token),
-          apiRequest<Evaluation[]>("/manager/evaluations", {}, token),
+          apiRequest<Evaluation[]>(`/manager/evaluations${buildEvalQuery(true)}`, {}, token),
           apiRequest<User[]>("/users", {}, token)
         ]);
       setLevels(levelData);
@@ -49,7 +75,7 @@ export function ManagerPage() {
   useEffect(() => {
     void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, evalDateFrom, evalDateTo, evalStatus, evalInstructorId, evalSupervisorId, evalSortBy, evalSortDir, evalLimit, evalOffset]);
 
   async function createLevel(event: FormEvent) {
     event.preventDefault();
@@ -109,7 +135,7 @@ export function ManagerPage() {
 
   async function exportCsv() {
     if (!token) return;
-    const blob = await apiBlob("/exports/evaluations.csv", {}, token);
+    const blob = await apiBlob(`/exports/evaluations.csv${buildEvalQuery(false)}`, {}, token);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -125,6 +151,8 @@ export function ManagerPage() {
   }
 
   const usersById = new Map(users.map((user) => [user.id, user]));
+  const supervisors = users.filter((user) => user.role === "SUPERVISOR");
+  const instructors = users.filter((user) => user.role === "INSTRUCTOR");
 
   return (
     <div className="stack">
@@ -248,6 +276,47 @@ export function ManagerPage() {
 
       <section className="panel">
         <h3>Global Evaluations</h3>
+        <div className="inline-form">
+          <input type="date" value={evalDateFrom} onChange={(e) => { setEvalOffset(0); setEvalDateFrom(e.target.value); }} />
+          <input type="date" value={evalDateTo} onChange={(e) => { setEvalOffset(0); setEvalDateTo(e.target.value); }} />
+          <select value={evalStatus} onChange={(e) => { setEvalOffset(0); setEvalStatus(e.target.value); }}>
+            <option value="">All statuses</option>
+            <option value="DRAFT">DRAFT</option>
+            <option value="SUBMITTED">SUBMITTED</option>
+          </select>
+          <select value={evalInstructorId} onChange={(e) => { setEvalOffset(0); setEvalInstructorId(e.target.value); }}>
+            <option value="">All instructors</option>
+            {instructors.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.name}
+              </option>
+            ))}
+          </select>
+          <select value={evalSupervisorId} onChange={(e) => { setEvalOffset(0); setEvalSupervisorId(e.target.value); }}>
+            <option value="">All supervisors</option>
+            {supervisors.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.name}
+              </option>
+            ))}
+          </select>
+          <select value={evalSortBy} onChange={(e) => setEvalSortBy(e.target.value)}>
+            <option value="created_at">Sort by created</option>
+            <option value="session_date">Sort by session date</option>
+            <option value="submitted_at">Sort by submitted at</option>
+            <option value="status">Sort by status</option>
+            <option value="id">Sort by id</option>
+          </select>
+          <select value={evalSortDir} onChange={(e) => setEvalSortDir(e.target.value)}>
+            <option value="desc">Desc</option>
+            <option value="asc">Asc</option>
+          </select>
+          <select value={evalLimit} onChange={(e) => { setEvalOffset(0); setEvalLimit(Number(e.target.value)); }}>
+            <option value={10}>10</option>
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+          </select>
+        </div>
         <button onClick={exportCsv}>Export CSV</button>
         <table>
           <thead>
@@ -271,6 +340,15 @@ export function ManagerPage() {
             ))}
           </tbody>
         </table>
+        <div className="inline-form">
+          <button onClick={() => setEvalOffset(Math.max(0, evalOffset - evalLimit))} disabled={evalOffset === 0}>
+            Previous
+          </button>
+          <span>Offset: {evalOffset}</span>
+          <button onClick={() => setEvalOffset(evalOffset + evalLimit)} disabled={evaluations.length < evalLimit}>
+            Next
+          </button>
+        </div>
       </section>
     </div>
   );

@@ -11,7 +11,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import and_, select
+from sqlalchemy import and_, asc, desc, select
 from sqlalchemy.orm import Session, joinedload
 
 import models
@@ -531,6 +531,50 @@ def resolve_template(db: Session, level_id: int | None, skill_id: int | None) ->
     return db.scalar(stmt.order_by(models.Template.id.desc()))
 
 
+def apply_evaluation_filters(
+    stmt,
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    level_id: int | None = None,
+    skill_id: int | None = None,
+    supervisor_id: int | None = None,
+    instructor_id: int | None = None,
+    status_filter: models.EvaluationStatus | None = None,
+):
+    if date_from:
+        stmt = stmt.where(models.Evaluation.session_date >= date_from)
+    if date_to:
+        stmt = stmt.where(models.Evaluation.session_date <= date_to)
+    if level_id:
+        stmt = stmt.where(models.Evaluation.level_id == level_id)
+    if skill_id:
+        stmt = stmt.where(models.Evaluation.skill_id == skill_id)
+    if supervisor_id:
+        stmt = stmt.where(models.Evaluation.supervisor_id == supervisor_id)
+    if instructor_id:
+        stmt = stmt.where(models.Evaluation.instructor_id == instructor_id)
+    if status_filter:
+        stmt = stmt.where(models.Evaluation.status == status_filter)
+    return stmt
+
+
+def apply_evaluation_sort(stmt, sort_by: str, sort_dir: str):
+    sortable_columns = {
+        "id": models.Evaluation.id,
+        "created_at": models.Evaluation.created_at,
+        "session_date": models.Evaluation.session_date,
+        "submitted_at": models.Evaluation.submitted_at,
+        "status": models.Evaluation.status,
+    }
+    if sort_by not in sortable_columns:
+        raise HTTPException(status_code=400, detail=f"Invalid sort_by: {sort_by}")
+    if sort_dir not in {"asc", "desc"}:
+        raise HTTPException(status_code=400, detail=f"Invalid sort_dir: {sort_dir}")
+    column = sortable_columns[sort_by]
+    return stmt.order_by(asc(column) if sort_dir == "asc" else desc(column))
+
+
 @app.post("/evaluations/draft", response_model=EvaluationOut)
 def create_evaluation_draft(
     payload: EvaluationCreate,
@@ -647,21 +691,26 @@ def list_my_evaluations(
     date_to: date | None = None,
     level_id: int | None = None,
     skill_id: int | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    sort_by: str = Query(default="session_date"),
+    sort_dir: str = Query(default="desc"),
 ):
     stmt = (
         select(models.Evaluation)
         .options(joinedload(models.Evaluation.ratings))
         .where(models.Evaluation.instructor_id == instructor.id, models.Evaluation.status == models.EvaluationStatus.submitted)
     )
-    if date_from:
-        stmt = stmt.where(models.Evaluation.session_date >= date_from)
-    if date_to:
-        stmt = stmt.where(models.Evaluation.session_date <= date_to)
-    if level_id:
-        stmt = stmt.where(models.Evaluation.level_id == level_id)
-    if skill_id:
-        stmt = stmt.where(models.Evaluation.skill_id == skill_id)
-    return list(db.scalars(stmt.order_by(models.Evaluation.session_date.desc())).unique().all())
+    stmt = apply_evaluation_filters(
+        stmt,
+        date_from=date_from,
+        date_to=date_to,
+        level_id=level_id,
+        skill_id=skill_id,
+        status_filter=models.EvaluationStatus.submitted,
+    )
+    stmt = apply_evaluation_sort(stmt, sort_by=sort_by, sort_dir=sort_dir)
+    return list(db.scalars(stmt.offset(offset).limit(limit)).unique().all())
 
 
 @app.get("/manager/evaluations", response_model=list[EvaluationOut])
@@ -675,23 +724,24 @@ def manager_list_evaluations(
     supervisor_id: int | None = None,
     instructor_id: int | None = None,
     status_filter: models.EvaluationStatus | None = Query(default=None, alias="status"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    sort_by: str = Query(default="created_at"),
+    sort_dir: str = Query(default="desc"),
 ):
     stmt = select(models.Evaluation).options(joinedload(models.Evaluation.ratings))
-    if date_from:
-        stmt = stmt.where(models.Evaluation.session_date >= date_from)
-    if date_to:
-        stmt = stmt.where(models.Evaluation.session_date <= date_to)
-    if level_id:
-        stmt = stmt.where(models.Evaluation.level_id == level_id)
-    if skill_id:
-        stmt = stmt.where(models.Evaluation.skill_id == skill_id)
-    if supervisor_id:
-        stmt = stmt.where(models.Evaluation.supervisor_id == supervisor_id)
-    if instructor_id:
-        stmt = stmt.where(models.Evaluation.instructor_id == instructor_id)
-    if status_filter:
-        stmt = stmt.where(models.Evaluation.status == status_filter)
-    return list(db.scalars(stmt.order_by(models.Evaluation.created_at.desc())).unique().all())
+    stmt = apply_evaluation_filters(
+        stmt,
+        date_from=date_from,
+        date_to=date_to,
+        level_id=level_id,
+        skill_id=skill_id,
+        supervisor_id=supervisor_id,
+        instructor_id=instructor_id,
+        status_filter=status_filter,
+    )
+    stmt = apply_evaluation_sort(stmt, sort_by=sort_by, sort_dir=sort_dir)
+    return list(db.scalars(stmt.offset(offset).limit(limit)).unique().all())
 
 
 @app.get("/supervisor/evaluations", response_model=list[EvaluationOut])
@@ -699,15 +749,19 @@ def supervisor_list_evaluations(
     db: Annotated[Session, Depends(get_db)],
     supervisor: Annotated[models.User, Depends(require_roles(models.UserRole.supervisor))],
     status_filter: models.EvaluationStatus | None = Query(default=None, alias="status"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    sort_by: str = Query(default="created_at"),
+    sort_dir: str = Query(default="desc"),
 ):
     stmt = (
         select(models.Evaluation)
         .options(joinedload(models.Evaluation.ratings))
         .where(models.Evaluation.supervisor_id == supervisor.id)
     )
-    if status_filter:
-        stmt = stmt.where(models.Evaluation.status == status_filter)
-    return list(db.scalars(stmt.order_by(models.Evaluation.created_at.desc())).unique().all())
+    stmt = apply_evaluation_filters(stmt, status_filter=status_filter)
+    stmt = apply_evaluation_sort(stmt, sort_by=sort_by, sort_dir=sort_dir)
+    return list(db.scalars(stmt.offset(offset).limit(limit)).unique().all())
 
 
 @app.get("/exports/evaluations.csv")
@@ -716,13 +770,27 @@ def export_evaluations_csv(
     _: Annotated[models.User, Depends(require_roles(models.UserRole.manager))],
     date_from: date | None = None,
     date_to: date | None = None,
+    level_id: int | None = None,
+    skill_id: int | None = None,
+    supervisor_id: int | None = None,
+    instructor_id: int | None = None,
+    status_filter: models.EvaluationStatus | None = Query(default=None, alias="status"),
+    sort_by: str = Query(default="created_at"),
+    sort_dir: str = Query(default="desc"),
 ):
     stmt = select(models.Evaluation).options(joinedload(models.Evaluation.ratings))
-    if date_from:
-        stmt = stmt.where(models.Evaluation.session_date >= date_from)
-    if date_to:
-        stmt = stmt.where(models.Evaluation.session_date <= date_to)
-    evaluations = list(db.scalars(stmt.order_by(models.Evaluation.id)).unique().all())
+    stmt = apply_evaluation_filters(
+        stmt,
+        date_from=date_from,
+        date_to=date_to,
+        level_id=level_id,
+        skill_id=skill_id,
+        supervisor_id=supervisor_id,
+        instructor_id=instructor_id,
+        status_filter=status_filter,
+    )
+    stmt = apply_evaluation_sort(stmt, sort_by=sort_by, sort_dir=sort_dir)
+    evaluations = list(db.scalars(stmt).unique().all())
 
     output = io.StringIO()
     writer = csv.writer(output)
