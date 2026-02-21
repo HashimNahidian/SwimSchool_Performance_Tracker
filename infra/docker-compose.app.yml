@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:15
+    container_name: propel_db
+    restart: always
+    environment:
+      POSTGRES_USER: propel
+      POSTGRES_PASSWORD: propelpass
+      POSTGRES_DB: propel_eval
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U propel -d propel_eval"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: propel_backend
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://propel:propelpass@db:5432/propel_eval
+      SECRET_KEY: replace-with-strong-secret
+      SQL_ECHO: "false"
+      ACCESS_TOKEN_EXPIRE_HOURS: "8"
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: propel_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+volumes:
+  postgres_data:

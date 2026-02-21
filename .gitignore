@@ -24,3 +24,8 @@ frontend/dist/
 # Backups
 backups/
 
+# Frontend artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+
