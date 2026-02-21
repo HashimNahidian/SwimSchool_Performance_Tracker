@@ -569,6 +569,7 @@ function SupervisorCreateEvaluation({
         </label>
         <fieldset>
           <legend>Ratings</legend>
+          <p>Default selection is 2 (Meets) for each criterion.</p>
           {criteria.map((criterion) => (
             <label key={criterion.attribute_id} className="inline-rating">
               <span>{criterion.attribute_name}</span>
@@ -587,9 +588,13 @@ function SupervisorCreateEvaluation({
               </select>
             </label>
           ))}
-          {criteria.length === 0 ? <p>No template criteria found for selected level/skill.</p> : null}
+          {criteria.length === 0 ? (
+            <p className="error">No template criteria found for selected level/skill. Cannot save draft.</p>
+          ) : null}
         </fieldset>
-        <button type="submit">Save Draft</button>
+        <button type="submit" disabled={criteria.length === 0}>
+          Save Draft
+        </button>
       </form>
     </Section>
   );
