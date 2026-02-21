@@ -12,5 +12,11 @@
     "jsx": "react-jsx",
     "strict": true
   },
-  "include": ["src"]
+  "include": [
+    "src/main.tsx",
+    "src/App.tsx",
+    "src/api.ts",
+    "src/types.ts",
+    "src/vite-env.d.ts"
+  ]
 }

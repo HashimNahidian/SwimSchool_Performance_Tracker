@@ -1,11 +1,7 @@
 :root {
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   color: #0f172a;
-<<<<<<< HEAD
   background: linear-gradient(160deg, #e2f2fb 0%, #f8fbff 40%, #ebf8f3 100%);
-=======
-  background: #f8fafc;
->>>>>>> origin/main
 }
 
 * {
@@ -16,7 +12,6 @@ body {
   margin: 0;
 }
 
-<<<<<<< HEAD
 .layout {
   max-width: 1200px;
   margin: 0 auto;
@@ -80,83 +75,10 @@ button:hover,
 .form.inline {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   align-items: end;
-=======
-.app-shell {
-  min-height: 100vh;
-}
-
-.topbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.5rem;
-  background: #0b3c5d;
-  color: #fff;
-}
-
-.topbar h1 {
-  margin: 0;
-  font-size: 1.2rem;
-}
-
-.topbar-right {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.nav {
-  display: flex;
-  gap: 1rem;
-  padding: 0.8rem 1.5rem;
-  border-bottom: 1px solid #dbe3ef;
-  background: #fff;
-}
-
-.nav a {
-  color: #0b3c5d;
-  text-decoration: none;
-  font-weight: 600;
-}
-
-.content {
-  padding: 1.2rem 1.5rem;
-}
-
-.stack {
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-}
-
-.panel {
-  background: #fff;
-  border: 1px solid #dbe3ef;
-  border-radius: 8px;
-  padding: 1rem;
-}
-
-.panel.narrow {
-  max-width: 420px;
-}
-
-.inline-form {
-  display: flex;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 0.5rem;
->>>>>>> origin/main
 }
 
 input,
 select,
-<<<<<<< HEAD
 textarea {
   width: 100%;
   border: 1px solid #bfd2e0;
@@ -167,32 +89,12 @@ textarea {
 table {
   width: 100%;
   border-collapse: collapse;
-=======
-textarea,
-button {
-  font: inherit;
-  padding: 0.45rem 0.55rem;
-}
-
-button {
-  cursor: pointer;
-}
-
-table {
-  border-collapse: collapse;
-  width: 100%;
->>>>>>> origin/main
 }
 
 th,
 td {
-<<<<<<< HEAD
   border-bottom: 1px solid #e2e8f0;
   padding: 8px;
-=======
-  border: 1px solid #dbe3ef;
-  padding: 0.45rem;
->>>>>>> origin/main
   text-align: left;
 }
 
@@ -200,7 +102,6 @@ td {
   color: #b91c1c;
   font-weight: 600;
 }
-<<<<<<< HEAD
 
 .inline-rating {
   display: flex;
@@ -218,5 +119,3 @@ td {
     overflow-x: auto;
   }
 }
-=======
->>>>>>> origin/main
