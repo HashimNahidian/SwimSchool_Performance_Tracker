@@ -15,9 +15,10 @@ import {
   login,
   logout,
   me,
+  resolveSupervisorTemplate,
   refresh
 } from "./api";
-import type { EvaluationSummary, Level, Skill, User, UserRole } from "./types";
+import type { EvaluationSummary, Level, Skill, TemplateResolved, User, UserRole } from "./types";
 
 type AppTab = "users" | "levels" | "skills" | "evaluations";
 
@@ -460,6 +461,8 @@ function SupervisorCreateEvaluation({
   const [sessionLabel, setSessionLabel] = useState("");
   const [sessionDate, setSessionDate] = useState("");
   const [notes, setNotes] = useState("");
+  const [criteria, setCriteria] = useState<TemplateResolved["attributes"]>([]);
+  const [ratings, setRatings] = useState<Record<number, number>>({});
 
   const levelSkills = skills.filter((x) => x.level_id === levelId);
 
@@ -475,6 +478,25 @@ function SupervisorCreateEvaluation({
     if (levelSkills.length > 0) setSkillId(levelSkills[0].id);
   }, [levelId]);
 
+  useEffect(() => {
+    if (!levelId || !skillId) {
+      setCriteria([]);
+      setRatings({});
+      return;
+    }
+    resolveSupervisorTemplate(token, levelId, skillId)
+      .then((template) => {
+        setCriteria(template.attributes);
+        const nextRatings: Record<number, number> = {};
+        for (const item of template.attributes) nextRatings[item.attribute_id] = 2;
+        setRatings(nextRatings);
+      })
+      .catch(() => {
+        setCriteria([]);
+        setRatings({});
+      });
+  }, [token, levelId, skillId]);
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await createSupervisorEvaluation(token, {
@@ -484,7 +506,10 @@ function SupervisorCreateEvaluation({
       session_label: sessionLabel,
       session_date: sessionDate,
       notes,
-      ratings: []
+      ratings: criteria.map((criterion) => ({
+        attribute_id: criterion.attribute_id,
+        rating_value: ratings[criterion.attribute_id] ?? 2
+      }))
     });
     setSessionLabel("");
     setSessionDate("");
@@ -542,6 +567,28 @@ function SupervisorCreateEvaluation({
           Notes
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
+        <fieldset>
+          <legend>Ratings</legend>
+          {criteria.map((criterion) => (
+            <label key={criterion.attribute_id} className="inline-rating">
+              <span>{criterion.attribute_name}</span>
+              <select
+                value={ratings[criterion.attribute_id] ?? 2}
+                onChange={(e) =>
+                  setRatings((prev) => ({
+                    ...prev,
+                    [criterion.attribute_id]: Number(e.target.value)
+                  }))
+                }
+              >
+                <option value={1}>1 Remediate</option>
+                <option value={2}>2 Meets</option>
+                <option value={3}>3 Exceeds</option>
+              </select>
+            </label>
+          ))}
+          {criteria.length === 0 ? <p>No template criteria found for selected level/skill.</p> : null}
+        </fieldset>
         <button type="submit">Save Draft</button>
       </form>
     </Section>

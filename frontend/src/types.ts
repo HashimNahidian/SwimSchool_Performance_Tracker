@@ -43,3 +43,18 @@ export type EvaluationSummary = {
   status: "DRAFT" | "SUBMITTED";
   submitted_at: string | null;
 };
+
+export type TemplateCriterion = {
+  attribute_id: number;
+  attribute_name: string;
+  sort_order: number;
+};
+
+export type TemplateResolved = {
+  id: number;
+  name: string;
+  level_id: number | null;
+  skill_id: number | null;
+  active: boolean;
+  attributes: TemplateCriterion[];
+};

@@ -2,6 +2,7 @@ import type {
   EvaluationSummary,
   Level,
   Skill,
+  TemplateResolved,
   TokenResponse,
   User
 } from "./types";
@@ -121,6 +122,19 @@ export function createSupervisorEvaluation(
   }
 ): Promise<unknown> {
   return request("/supervisor/evaluations", "POST", payload, token);
+}
+
+export function resolveSupervisorTemplate(
+  token: string,
+  levelId: number,
+  skillId: number
+): Promise<TemplateResolved> {
+  return request(
+    `/supervisor/templates/resolve?level_id=${levelId}&skill_id=${skillId}`,
+    "GET",
+    undefined,
+    token
+  );
 }
 
 export function exportEvaluationsCsvUrl(): string {
