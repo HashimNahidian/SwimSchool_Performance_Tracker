@@ -28,9 +28,10 @@ def resolve_evaluation_template(
     level_id: int,
     skill_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
 ) -> TemplateOut:
-    ensure_level_skill_compatible(db, level_id, skill_id)
-    template = resolve_template(db, level_id, skill_id, template_id=None)
+    ensure_level_skill_compatible(db, level_id, skill_id, current_user.school_id)
+    template = resolve_template(db, level_id, skill_id, template_id=None, school_id=current_user.school_id)
     if not template:
         raise HTTPException(status_code=404, detail="No active template found for level/skill")
     db.refresh(template)
@@ -41,7 +42,7 @@ def resolve_evaluation_template(
 def list_my_evaluations(
     db: Session = Depends(get_db), current_user: User = Depends(require_roles(UserRole.SUPERVISOR))
 ) -> list[EvaluationSummaryOut]:
-    stmt = evaluation_query_with_joins().where(Evaluation.supervisor_id == current_user.id)
+    stmt = evaluation_query_with_joins(current_user.school_id).where(Evaluation.supervisor_id == current_user.id)
     evaluations = db.scalars(stmt).all()
     return [evaluation_summary_row(item) for item in evaluations]
 
@@ -52,11 +53,14 @@ def create_evaluation(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
 ) -> EvaluationDetailOut:
-    ensure_user_role(db, payload.instructor_id, UserRole.INSTRUCTOR)
-    ensure_level_skill_compatible(db, payload.level_id, payload.skill_id)
-    template = resolve_template(db, payload.level_id, payload.skill_id, payload.template_id)
+    ensure_user_role(db, payload.instructor_id, UserRole.INSTRUCTOR, current_user.school_id)
+    ensure_level_skill_compatible(db, payload.level_id, payload.skill_id, current_user.school_id)
+    template = resolve_template(
+        db, payload.level_id, payload.skill_id, payload.template_id, current_user.school_id
+    )
 
     evaluation = Evaluation(
+        school_id=current_user.school_id,
         instructor_id=payload.instructor_id,
         supervisor_id=current_user.id,
         level_id=payload.level_id,
@@ -72,7 +76,7 @@ def create_evaluation(
     sync_ratings(db, evaluation, [(r.attribute_id, r.rating_value) for r in payload.ratings])
     db.commit()
 
-    stmt = evaluation_query_with_joins().where(Evaluation.id == evaluation.id)
+    stmt = evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation.id)
     created = db.scalar(stmt)
     if not created:
         raise HTTPException(status_code=500, detail="Failed to reload evaluation")
@@ -89,6 +93,7 @@ def update_evaluation(
     evaluation = db.scalar(
         select(Evaluation).where(
             Evaluation.id == evaluation_id,
+            Evaluation.school_id == current_user.school_id,
             Evaluation.supervisor_id == current_user.id,
         )
     )
@@ -102,7 +107,7 @@ def update_evaluation(
         sync_ratings(db, evaluation, [(r.attribute_id, r.rating_value) for r in payload.ratings])
     db.commit()
 
-    full = db.scalar(evaluation_query_with_joins().where(Evaluation.id == evaluation.id))
+    full = db.scalar(evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation.id))
     if not full:
         raise HTTPException(status_code=500, detail="Failed to reload evaluation")
     return evaluation_detail_row(full)
@@ -121,6 +126,7 @@ def submit_my_evaluation(
     evaluation = db.scalar(
         select(Evaluation).where(
             Evaluation.id == evaluation_id,
+            Evaluation.school_id == current_user.school_id,
             Evaluation.supervisor_id == current_user.id,
         )
     )
@@ -129,7 +135,7 @@ def submit_my_evaluation(
     submit_evaluation(evaluation)
     db.commit()
 
-    full = db.scalar(evaluation_query_with_joins().where(Evaluation.id == evaluation.id))
+    full = db.scalar(evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation.id))
     if not full:
         raise HTTPException(status_code=500, detail="Failed to reload evaluation")
     return evaluation_detail_row(full)

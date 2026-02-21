@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from config import settings
 from db import get_db
 from deps import get_current_user
-from models import RefreshToken, User, UserRole
+from models import RefreshToken, School, User, UserRole
 from rate_limiter import FixedWindowRateLimiter
 from schemas import LoginRequest, RefreshRequest, TokenResponse, UserCreate, UserOut
 from security import (
@@ -30,13 +30,21 @@ login_limiter = FixedWindowRateLimiter(
 def bootstrap_manager(payload: UserCreate, db: Session = Depends(get_db)) -> User:
     if settings.app_env == "production" and not settings.allow_bootstrap_manager:
         raise HTTPException(status_code=403, detail="Bootstrap is disabled in production")
-    manager_exists = db.scalar(select(User.id).where(User.role == UserRole.MANAGER))
+    school = db.scalar(select(School).order_by(School.id.asc()))
+    if not school:
+        school = School(name="Default School", active=True)
+        db.add(school)
+        db.flush()
+    manager_exists = db.scalar(
+        select(User.id).where(User.role == UserRole.MANAGER, User.school_id == school.id)
+    )
     if manager_exists:
         raise HTTPException(status_code=400, detail="Manager already exists")
     if payload.role != UserRole.MANAGER:
         raise HTTPException(status_code=400, detail="Bootstrap must create MANAGER role")
 
     user = User(
+        school_id=school.id,
         name=payload.name,
         email=payload.email.lower(),
         password_hash=hash_password(payload.password),

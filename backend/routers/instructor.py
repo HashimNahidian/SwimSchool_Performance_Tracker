@@ -25,7 +25,7 @@ def list_my_evaluations(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.INSTRUCTOR)),
 ) -> list[EvaluationSummaryOut]:
-    stmt = evaluation_query_with_joins().where(Evaluation.instructor_id == current_user.id)
+    stmt = evaluation_query_with_joins(current_user.school_id).where(Evaluation.instructor_id == current_user.id)
     filters = []
     if date_from:
         filters.append(Evaluation.session_date >= date_from)
@@ -54,7 +54,7 @@ def get_my_evaluation(
     current_user: User = Depends(require_roles(UserRole.INSTRUCTOR)),
 ) -> EvaluationDetailOut:
     evaluation = db.scalar(
-        evaluation_query_with_joins().where(
+        evaluation_query_with_joins(current_user.school_id).where(
             Evaluation.id == evaluation_id,
             Evaluation.instructor_id == current_user.id,
         )

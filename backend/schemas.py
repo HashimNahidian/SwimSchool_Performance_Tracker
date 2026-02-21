@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from models import EvaluationStatus, UserRole
 
@@ -12,7 +12,7 @@ class TokenResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8)
 
 
@@ -22,7 +22,7 @@ class RefreshRequest(BaseModel):
 
 class UserCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    email: EmailStr
+    email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8)
     role: UserRole
     active: bool = True
@@ -32,8 +32,9 @@ class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    school_id: int
     name: str
-    email: EmailStr
+    email: str
     role: UserRole
     active: bool
 
@@ -59,12 +60,14 @@ class LevelOut(BaseModel):
 class SkillBase(BaseModel):
     level_id: int
     name: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
     active: bool = True
 
 
 class SkillUpdate(BaseModel):
     level_id: int | None = None
     name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
     active: bool | None = None
 
 
@@ -74,6 +77,7 @@ class SkillOut(BaseModel):
     id: int
     level_id: int
     name: str
+    description: str | None
     active: bool
 
 

@@ -27,35 +27,38 @@ from schemas import (
 )
 
 
-def ensure_user_role(db: Session, user_id: int, expected_role: UserRole) -> User:
+def ensure_user_role(db: Session, user_id: int, expected_role: UserRole, school_id: int) -> User:
     user = db.get(User, user_id)
-    if not user or user.role != expected_role or not user.active:
+    if not user or user.school_id != school_id or user.role != expected_role or not user.active:
         raise HTTPException(status_code=400, detail=f"User {user_id} is not an active {expected_role.value}")
     return user
 
 
-def ensure_level_skill_compatible(db: Session, level_id: int, skill_id: int) -> tuple[Level, Skill]:
+def ensure_level_skill_compatible(db: Session, level_id: int, skill_id: int, school_id: int) -> tuple[Level, Skill]:
     level = db.get(Level, level_id)
     skill = db.get(Skill, skill_id)
-    if not level or not level.active:
+    if not level or level.school_id != school_id or not level.active:
         raise HTTPException(status_code=404, detail="Level not found or inactive")
-    if not skill or not skill.active:
+    if not skill or skill.school_id != school_id or not skill.active:
         raise HTTPException(status_code=404, detail="Skill not found or inactive")
     if skill.level_id != level.id:
         raise HTTPException(status_code=400, detail="Skill does not belong to level")
     return level, skill
 
 
-def resolve_template(db: Session, level_id: int, skill_id: int, template_id: int | None) -> Template | None:
+def resolve_template(
+    db: Session, level_id: int, skill_id: int, template_id: int | None, school_id: int
+) -> Template | None:
     if template_id is not None:
         template = db.get(Template, template_id)
-        if not template or not template.active:
+        if not template or template.school_id != school_id or not template.active:
             raise HTTPException(status_code=404, detail="Template not found or inactive")
         return template
 
     exact = db.scalar(
         select(Template).where(
             and_(
+                Template.school_id == school_id,
                 Template.active.is_(True),
                 Template.level_id == level_id,
                 Template.skill_id == skill_id,
@@ -68,6 +71,7 @@ def resolve_template(db: Session, level_id: int, skill_id: int, template_id: int
     fallback = db.scalar(
         select(Template).where(
             and_(
+                Template.school_id == school_id,
                 Template.active.is_(True),
                 Template.level_id == level_id,
                 Template.skill_id.is_(None),
@@ -183,9 +187,10 @@ def template_attributes_replace(db: Session, template: Template, attributes: lis
         )
 
 
-def evaluation_query_with_joins():
+def evaluation_query_with_joins(school_id: int):
     return (
         select(Evaluation)
+        .where(Evaluation.school_id == school_id)
         .options(
             joinedload(Evaluation.instructor),
             joinedload(Evaluation.supervisor),
