@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from db import get_db
 from deps import require_roles
 from models import (
+    Attribute,
     Evaluation,
     EvaluationRating,
     EvaluationStatus,
@@ -18,6 +19,7 @@ from models import (
     UserRole,
 )
 from schemas import (
+    AttributeOut,
     EvaluationSummaryOut,
     LevelBase,
     LevelOut,
@@ -133,6 +135,11 @@ def list_skills(
     if level_id:
         stmt = stmt.where(Skill.level_id == level_id)
     return db.scalars(stmt.order_by(Skill.name.asc())).all()
+
+
+@router.get("/attributes", response_model=list[AttributeOut], dependencies=[manager_guard])
+def list_attributes(db: Session = Depends(get_db)) -> list[Attribute]:
+    return db.scalars(select(Attribute).where(Attribute.active.is_(True)).order_by(Attribute.name.asc())).all()
 
 
 @router.post("/skills", response_model=SkillOut, dependencies=[manager_guard])

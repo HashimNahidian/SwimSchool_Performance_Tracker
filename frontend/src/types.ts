@@ -28,6 +28,13 @@ export type Skill = {
   active: boolean;
 };
 
+export type Attribute = {
+  id: number;
+  name: string;
+  description: string | null;
+  active: boolean;
+};
+
 export type EvaluationSummary = {
   id: number;
   instructor_id: number;
@@ -51,6 +58,15 @@ export type TemplateCriterion = {
 };
 
 export type TemplateResolved = {
+  id: number;
+  name: string;
+  level_id: number | null;
+  skill_id: number | null;
+  active: boolean;
+  attributes: TemplateCriterion[];
+};
+
+export type TemplateConfig = {
   id: number;
   name: string;
   level_id: number | null;

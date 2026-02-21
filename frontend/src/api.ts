@@ -1,7 +1,9 @@
 import type {
+  Attribute,
   EvaluationSummary,
   Level,
   Skill,
+  TemplateConfig,
   TemplateResolved,
   TokenResponse,
   User
@@ -92,9 +94,44 @@ export function listSkills(token: string): Promise<Skill[]> {
 
 export function createSkill(
   token: string,
-  payload: { level_id: number; name: string; active: boolean }
+  payload: { level_id: number; name: string; description?: string; active: boolean }
 ): Promise<Skill> {
   return request("/manager/skills", "POST", payload, token);
+}
+
+export function listAttributes(token: string): Promise<Attribute[]> {
+  return request("/manager/attributes", "GET", undefined, token);
+}
+
+export function listTemplates(token: string): Promise<TemplateConfig[]> {
+  return request("/manager/templates", "GET", undefined, token);
+}
+
+export function createTemplate(
+  token: string,
+  payload: {
+    name: string;
+    level_id: number;
+    skill_id: number;
+    active: boolean;
+    attributes: Array<{ attribute_id: number; sort_order: number }>;
+  }
+): Promise<TemplateConfig> {
+  return request("/manager/templates", "POST", payload, token);
+}
+
+export function updateTemplate(
+  token: string,
+  templateId: number,
+  payload: {
+    name?: string;
+    level_id?: number | null;
+    skill_id?: number | null;
+    active?: boolean;
+    attributes?: Array<{ attribute_id: number; sort_order: number }>;
+  }
+): Promise<TemplateConfig> {
+  return request(`/manager/templates/${templateId}`, "PUT", payload, token);
 }
 
 export function listManagerEvaluations(token: string): Promise<EvaluationSummary[]> {

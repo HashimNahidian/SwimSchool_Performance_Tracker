@@ -81,6 +81,15 @@ class SkillOut(BaseModel):
     active: bool
 
 
+class AttributeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: str | None
+    active: bool
+
+
 class TemplateAttributeIn(BaseModel):
     attribute_id: int
     sort_order: int = Field(ge=1)

@@ -4,24 +4,37 @@ import {
   createLevel,
   createSkill,
   createSupervisorEvaluation,
+  createTemplate,
   createUser,
   exportEvaluationsCsvUrl,
+  listAttributes,
   listInstructorEvaluations,
   listLevels,
   listManagerEvaluationsWithQuery,
   listSkills,
   listSupervisorEvaluations,
+  listTemplates,
   listUsers,
   login,
   logout,
   me,
   resolveSupervisorTemplate,
+  updateTemplate,
   refresh
 } from "./api";
 import type { ManagerEvaluationQuery } from "./api";
-import type { EvaluationSummary, Level, Skill, TemplateResolved, User, UserRole } from "./types";
+import type {
+  Attribute,
+  EvaluationSummary,
+  Level,
+  Skill,
+  TemplateConfig,
+  TemplateResolved,
+  User,
+  UserRole
+} from "./types";
 
-type AppTab = "dashboard" | "users" | "levels" | "skills" | "evaluations";
+type AppTab = "dashboard" | "users" | "levels" | "skills" | "templates" | "evaluations";
 
 function Section({
   title,
@@ -108,6 +121,8 @@ export default function App() {
   const [users, setUsers] = useState<User[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [attributes, setAttributes] = useState<Attribute[]>([]);
+  const [templates, setTemplates] = useState<TemplateConfig[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
   const [managerFilters, setManagerFilters] = useState({
     instructor_id: "",
@@ -175,12 +190,16 @@ export default function App() {
         listUsers(token),
         listLevels(token),
         listSkills(token),
+        listAttributes(token),
+        listTemplates(token),
         listManagerEvaluationsWithQuery(token, appliedManagerQuery)
       ])
-        .then(([nextUsers, nextLevels, nextSkills, nextEvaluations]) => {
+        .then(([nextUsers, nextLevels, nextSkills, nextAttributes, nextTemplates, nextEvaluations]) => {
           setUsers(nextUsers);
           setLevels(nextLevels);
           setSkills(nextSkills);
+          setAttributes(nextAttributes);
+          setTemplates(nextTemplates);
           setEvaluations(nextEvaluations);
         })
         .catch((e: Error) => setError(e.message));
@@ -286,7 +305,7 @@ export default function App() {
       {role === "MANAGER" ? (
         <>
           <nav className="tabs">
-            {(["dashboard", "users", "levels", "skills", "evaluations"] as AppTab[]).map(
+            {(["dashboard", "users", "levels", "skills", "templates", "evaluations"] as AppTab[]).map(
               (item) => (
                 <button
                   key={item}
@@ -302,7 +321,7 @@ export default function App() {
             <ManagerDashboard
               rows={evaluations}
               onGo={setTab}
-              onConfigureTemplates={() => setError("Template configuration page coming next.")}
+              onConfigureTemplates={() => setTab("templates")}
               onExport={downloadCsv}
             />
           ) : null}
@@ -326,6 +345,19 @@ export default function App() {
               levels={levels}
               skills={skills}
               onCreated={(skill) => setSkills((prev) => [...prev, skill])}
+            />
+          ) : null}
+          {tab === "templates" ? (
+            <ManagerTemplates
+              token={token}
+              levels={levels}
+              skills={skills}
+              attributes={attributes}
+              templates={templates}
+              onCreated={(template) => setTemplates((prev) => [...prev, template])}
+              onUpdated={(template) =>
+                setTemplates((prev) => prev.map((item) => (item.id === template.id ? template : item)))
+              }
             />
           ) : null}
           {tab === "evaluations" ? (
@@ -612,6 +644,7 @@ function ManagerSkills({
   onCreated: (skill: Skill) => void;
 }) {
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [levelId, setLevelId] = useState<number>(levels[0]?.id ?? 0);
 
   useEffect(() => {
@@ -620,15 +653,21 @@ function ManagerSkills({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const skill = await createSkill(token, { name, level_id: levelId, active: true });
+    const skill = await createSkill(token, { name, description, level_id: levelId, active: true });
     onCreated(skill);
     setName("");
+    setDescription("");
   }
 
   return (
     <Section title="Skills">
       <form className="form inline" onSubmit={onSubmit}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="skill name" required />
+        <input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="skill description"
+        />
         <select value={levelId} onChange={(e) => setLevelId(Number(e.target.value))}>
           {levels.map((level) => (
             <option key={level.id} value={level.id}>
@@ -641,10 +680,155 @@ function ManagerSkills({
       <ul>
         {skills.map((skill) => (
           <li key={skill.id}>
-            {skill.name} (level {skill.level_id})
+            {skill.name} (level {skill.level_id}) {skill.description ? `- ${skill.description}` : ""}
           </li>
         ))}
       </ul>
+    </Section>
+  );
+}
+
+function ManagerTemplates({
+  token,
+  levels,
+  skills,
+  attributes,
+  templates,
+  onCreated,
+  onUpdated
+}: {
+  token: string;
+  levels: Level[];
+  skills: Skill[];
+  attributes: Attribute[];
+  templates: TemplateConfig[];
+  onCreated: (template: TemplateConfig) => void;
+  onUpdated: (template: TemplateConfig) => void;
+}) {
+  const [name, setName] = useState("");
+  const [levelId, setLevelId] = useState<number>(levels[0]?.id ?? 0);
+  const [skillId, setSkillId] = useState<number>(0);
+  const [selected, setSelected] = useState<Record<number, number>>({});
+
+  const levelSkills = skills.filter((x) => x.level_id === levelId);
+
+  useEffect(() => {
+    if (!levelId && levels.length > 0) setLevelId(levels[0].id);
+  }, [levelId, levels]);
+
+  useEffect(() => {
+    if (levelSkills.length > 0) setSkillId(levelSkills[0].id);
+  }, [levelId]);
+
+  function toggleAttribute(attributeId: number, checked: boolean) {
+    setSelected((prev) => {
+      if (!checked) {
+        const next = { ...prev };
+        delete next[attributeId];
+        return next;
+      }
+      return { ...prev, [attributeId]: Object.keys(prev).length + 1 };
+    });
+  }
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const attributesPayload = Object.entries(selected)
+      .map(([attributeId, sortOrder]) => ({ attribute_id: Number(attributeId), sort_order: sortOrder }))
+      .sort((a, b) => a.sort_order - b.sort_order);
+    if (!name.trim() || !levelId || !skillId || attributesPayload.length === 0) return;
+    const template = await createTemplate(token, {
+      name: name.trim(),
+      level_id: levelId,
+      skill_id: skillId,
+      active: true,
+      attributes: attributesPayload
+    });
+    onCreated(template);
+    setName("");
+    setSelected({});
+  }
+
+  return (
+    <Section title="Templates">
+      <form className="form" onSubmit={onSubmit}>
+        <div className="form inline">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="template name" required />
+          <select value={levelId} onChange={(e) => setLevelId(Number(e.target.value))}>
+            {levels.map((level) => (
+              <option key={level.id} value={level.id}>
+                {level.name}
+              </option>
+            ))}
+          </select>
+          <select value={skillId} onChange={(e) => setSkillId(Number(e.target.value))}>
+            {levelSkills.map((skill) => (
+              <option key={skill.id} value={skill.id}>
+                {skill.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="form">
+          {attributes.map((attribute) => {
+            const checked = selected[attribute.id] !== undefined;
+            return (
+              <label key={attribute.id} className="inline-rating">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => toggleAttribute(attribute.id, e.target.checked)}
+                />
+                <span>{attribute.name}</span>
+                <input
+                  type="number"
+                  min={1}
+                  disabled={!checked}
+                  value={checked ? selected[attribute.id] : ""}
+                  onChange={(e) =>
+                    setSelected((prev) => ({ ...prev, [attribute.id]: Number.parseInt(e.target.value || "1", 10) }))
+                  }
+                  style={{ width: 90 }}
+                />
+              </label>
+            );
+          })}
+        </div>
+        <button type="submit">Create Template</button>
+      </form>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Level</th>
+            <th>Skill</th>
+            <th>Criteria</th>
+            <th>Active</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {templates.map((template) => (
+            <tr key={template.id}>
+              <td>{template.name}</td>
+              <td>{levels.find((x) => x.id === template.level_id)?.name ?? "-"}</td>
+              <td>{skills.find((x) => x.id === template.skill_id)?.name ?? "-"}</td>
+              <td>{template.attributes.length}</td>
+              <td>{template.active ? "yes" : "no"}</td>
+              <td>
+                <button
+                  onClick={async () => {
+                    const updated = await updateTemplate(token, template.id, { active: !template.active });
+                    onUpdated(updated);
+                  }}
+                >
+                  {template.active ? "Deactivate" : "Activate"}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </Section>
   );
 }
