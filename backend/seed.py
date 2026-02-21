@@ -20,17 +20,19 @@ def get_or_create_user(
     school_id: int,
     active: bool = True,
 ) -> models.User:
-    user = db.scalar(select(models.User).where(models.User.email == email))
+    normalized_email = email.strip().lower()
+    user = db.scalar(select(models.User).where(models.User.email == normalized_email))
     if user:
         user.name = name
         user.role = role
         user.active = active
+        user.email = normalized_email
         user.password_hash = hash_password(password)
         return user
     user = models.User(
         school_id=school_id,
         name=name,
-        email=email,
+        email=normalized_email,
         password_hash=hash_password(password),
         role=role,
         active=active,

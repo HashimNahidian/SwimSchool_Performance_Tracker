@@ -64,17 +64,18 @@ def create_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> User:
+    normalized_email = payload.email.strip().lower()
     if db.scalar(
         select(User.id).where(
             User.school_id == current_user.school_id,
-            User.email == payload.email.lower(),
+            User.email == normalized_email,
         )
     ):
         raise HTTPException(status_code=400, detail="Email already exists")
     user = User(
         school_id=current_user.school_id,
         name=payload.name,
-        email=payload.email.lower(),
+        email=normalized_email,
         password_hash=hash_password(payload.password),
         role=payload.role,
         active=payload.active,

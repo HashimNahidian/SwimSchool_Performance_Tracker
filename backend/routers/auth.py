@@ -43,10 +43,11 @@ def bootstrap_manager(payload: UserCreate, db: Session = Depends(get_db)) -> Use
     if payload.role != UserRole.MANAGER:
         raise HTTPException(status_code=400, detail="Bootstrap must create MANAGER role")
 
+    normalized_email = payload.email.strip().lower()
     user = User(
         school_id=school.id,
         name=payload.name,
-        email=payload.email.lower(),
+        email=normalized_email,
         password_hash=hash_password(payload.password),
         role=payload.role,
         active=payload.active,
@@ -59,12 +60,13 @@ def bootstrap_manager(payload: UserCreate, db: Session = Depends(get_db)) -> Use
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
+    normalized_email = payload.email.strip().lower()
     source_ip = request.client.host if request.client else "unknown"
-    limiter_key = f"{source_ip}:{payload.email.lower()}"
+    limiter_key = f"{source_ip}:{normalized_email}"
     if not login_limiter.allow(limiter_key):
         raise HTTPException(status_code=429, detail="Too many login attempts, try again later")
 
-    user = db.scalar(select(User).where(User.email == payload.email.lower()))
+    user = db.scalar(select(User).where(User.email == normalized_email))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
