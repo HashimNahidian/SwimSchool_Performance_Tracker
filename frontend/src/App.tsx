@@ -1,13 +1,11 @@
 import { FormEvent, ReactNode, useMemo, useEffect, useState } from "react";
 
 import {
-  createAttribute,
   createLevel,
   createSkill,
   createSupervisorEvaluation,
   createUser,
   exportEvaluationsCsvUrl,
-  listAttributes,
   listInstructorEvaluations,
   listLevels,
   listManagerEvaluations,
@@ -19,9 +17,9 @@ import {
   me,
   refresh
 } from "./api";
-import type { Attribute, EvaluationSummary, Level, Skill, User, UserRole } from "./types";
+import type { EvaluationSummary, Level, Skill, User, UserRole } from "./types";
 
-type AppTab = "users" | "levels" | "skills" | "attributes" | "evaluations";
+type AppTab = "users" | "levels" | "skills" | "evaluations";
 
 function Section({
   title,
@@ -52,7 +50,6 @@ export default function App() {
   const [users, setUsers] = useState<User[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [attributes, setAttributes] = useState<Attribute[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
 
   const role = meUser?.role;
@@ -100,24 +97,21 @@ export default function App() {
         listUsers(token),
         listLevels(token),
         listSkills(token),
-        listAttributes(token),
         listManagerEvaluations(token)
       ])
-        .then(([nextUsers, nextLevels, nextSkills, nextAttributes, nextEvaluations]) => {
+        .then(([nextUsers, nextLevels, nextSkills, nextEvaluations]) => {
           setUsers(nextUsers);
           setLevels(nextLevels);
           setSkills(nextSkills);
-          setAttributes(nextAttributes);
           setEvaluations(nextEvaluations);
         })
         .catch((e: Error) => setError(e.message));
     } else if (role === "SUPERVISOR") {
-      Promise.all([listUsers(token), listLevels(token), listSkills(token), listAttributes(token), listSupervisorEvaluations(token)])
-        .then(([nextUsers, nextLevels, nextSkills, nextAttributes, nextEvaluations]) => {
+      Promise.all([listUsers(token), listLevels(token), listSkills(token), listSupervisorEvaluations(token)])
+        .then(([nextUsers, nextLevels, nextSkills, nextEvaluations]) => {
           setUsers(nextUsers.filter((x) => x.role === "INSTRUCTOR"));
           setLevels(nextLevels);
           setSkills(nextSkills);
-          setAttributes(nextAttributes);
           setEvaluations(nextEvaluations);
         })
         .catch((e: Error) => setError(e.message));
@@ -201,7 +195,7 @@ export default function App() {
       {role === "MANAGER" ? (
         <>
           <nav className="tabs">
-            {(["users", "levels", "skills", "attributes", "evaluations"] as AppTab[]).map(
+            {(["users", "levels", "skills", "evaluations"] as AppTab[]).map(
               (item) => (
                 <button
                   key={item}
@@ -233,13 +227,6 @@ export default function App() {
               levels={levels}
               skills={skills}
               onCreated={(skill) => setSkills((prev) => [...prev, skill])}
-            />
-          ) : null}
-          {tab === "attributes" ? (
-            <ManagerAttributes
-              token={token}
-              attributes={attributes}
-              onCreated={(attribute) => setAttributes((prev) => [...prev, attribute])}
             />
           ) : null}
           {tab === "evaluations" ? (
@@ -278,7 +265,6 @@ export default function App() {
             users={users}
             levels={levels}
             skills={skills}
-            attributes={attributes}
             onCreated={() => {
               listSupervisorEvaluations(token).then(setEvaluations).catch((e: Error) => setError(e.message));
             }}
@@ -455,61 +441,17 @@ function ManagerSkills({
   );
 }
 
-function ManagerAttributes({
-  token,
-  attributes,
-  onCreated
-}: {
-  token: string;
-  attributes: Attribute[];
-  onCreated: (attribute: Attribute) => void;
-}) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const attribute = await createAttribute(token, { name, description, active: true });
-    onCreated(attribute);
-    setName("");
-    setDescription("");
-  }
-
-  return (
-    <Section title="Attributes">
-      <form className="form inline" onSubmit={onSubmit}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="attribute name" required />
-        <input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="description"
-        />
-        <button type="submit">Add attribute</button>
-      </form>
-      <ul>
-        {attributes.map((attribute) => (
-          <li key={attribute.id}>
-            {attribute.name} {attribute.description ? `- ${attribute.description}` : ""}
-          </li>
-        ))}
-      </ul>
-    </Section>
-  );
-}
-
 function SupervisorCreateEvaluation({
   token,
   users,
   levels,
   skills,
-  attributes,
   onCreated
 }: {
   token: string;
   users: User[];
   levels: Level[];
   skills: Skill[];
-  attributes: Attribute[];
   onCreated: () => void;
 }) {
   const [instructorId, setInstructorId] = useState<number>(users[0]?.id ?? 0);
@@ -518,7 +460,6 @@ function SupervisorCreateEvaluation({
   const [sessionLabel, setSessionLabel] = useState("");
   const [sessionDate, setSessionDate] = useState("");
   const [notes, setNotes] = useState("");
-  const [ratings, setRatings] = useState<Record<number, number>>({});
 
   const levelSkills = skills.filter((x) => x.level_id === levelId);
 
@@ -543,15 +484,11 @@ function SupervisorCreateEvaluation({
       session_label: sessionLabel,
       session_date: sessionDate,
       notes,
-      ratings: Object.entries(ratings).map(([attribute_id, rating_value]) => ({
-        attribute_id: Number(attribute_id),
-        rating_value
-      }))
+      ratings: []
     });
     setSessionLabel("");
     setSessionDate("");
     setNotes("");
-    setRatings({});
     onCreated();
   }
 
@@ -605,25 +542,6 @@ function SupervisorCreateEvaluation({
           Notes
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
-        <fieldset>
-          <legend>Ratings</legend>
-          {attributes.map((a) => (
-            <label key={a.id} className="inline-rating">
-              <span>{a.name}</span>
-              <select
-                value={ratings[a.id] ?? ""}
-                onChange={(e) =>
-                  setRatings((prev) => ({ ...prev, [a.id]: Number(e.target.value) }))
-                }
-              >
-                <option value="">-</option>
-                <option value={1}>1 Remediate</option>
-                <option value={2}>2 Meets</option>
-                <option value={3}>3 Exceeds</option>
-              </select>
-            </label>
-          ))}
-        </fieldset>
         <button type="submit">Save Draft</button>
       </form>
     </Section>

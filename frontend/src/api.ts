@@ -1,5 +1,4 @@
 import type {
-  Attribute,
   EvaluationSummary,
   Level,
   Skill,
@@ -95,17 +94,6 @@ export function createSkill(
   payload: { level_id: number; name: string; active: boolean }
 ): Promise<Skill> {
   return request("/manager/skills", "POST", payload, token);
-}
-
-export function listAttributes(token: string): Promise<Attribute[]> {
-  return request("/manager/attributes", "GET", undefined, token);
-}
-
-export function createAttribute(
-  token: string,
-  payload: { name: string; description?: string; active: boolean }
-): Promise<Attribute> {
-  return request("/manager/attributes", "POST", payload, token);
 }
 
 export function listManagerEvaluations(token: string): Promise<EvaluationSummary[]> {

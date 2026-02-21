@@ -81,27 +81,6 @@ class SkillOut(BaseModel):
     active: bool
 
 
-class AttributeBase(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    description: str | None = Field(default=None, max_length=500)
-    active: bool = True
-
-
-class AttributeUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=120)
-    description: str | None = Field(default=None, max_length=500)
-    active: bool | None = None
-
-
-class AttributeOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    name: str
-    description: str | None
-    active: bool
-
-
 class TemplateAttributeIn(BaseModel):
     attribute_id: int
     sort_order: int = Field(ge=1)

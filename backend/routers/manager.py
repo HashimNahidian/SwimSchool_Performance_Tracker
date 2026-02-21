@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session, selectinload
 from db import get_db
 from deps import require_roles
 from models import (
-    Attribute,
     Evaluation,
     EvaluationStatus,
     Level,
@@ -18,9 +17,6 @@ from models import (
     UserRole,
 )
 from schemas import (
-    AttributeBase,
-    AttributeOut,
-    AttributeUpdate,
     EvaluationSummaryOut,
     LevelBase,
     LevelOut,
@@ -180,40 +176,6 @@ def update_skill(
     db.commit()
     db.refresh(skill)
     return skill
-
-
-@router.get("/attributes", response_model=list[AttributeOut], dependencies=[manager_guard])
-def list_attributes(
-    db: Session = Depends(get_db),
-) -> list[Attribute]:
-    return db.scalars(select(Attribute).order_by(Attribute.name.asc())).all()
-
-
-@router.post("/attributes", response_model=AttributeOut, dependencies=[manager_guard])
-def create_attribute(payload: AttributeBase, db: Session = Depends(get_db)) -> Attribute:
-    attribute = Attribute(
-        name=payload.name.strip(),
-        description=payload.description,
-        active=payload.active,
-    )
-    db.add(attribute)
-    db.commit()
-    db.refresh(attribute)
-    return attribute
-
-
-@router.put("/attributes/{attribute_id}", response_model=AttributeOut, dependencies=[manager_guard])
-def update_attribute(
-    attribute_id: int, payload: AttributeUpdate, db: Session = Depends(get_db)
-) -> Attribute:
-    attribute = db.get(Attribute, attribute_id)
-    if not attribute:
-        raise HTTPException(status_code=404, detail="Attribute not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(attribute, field, value)
-    db.commit()
-    db.refresh(attribute)
-    return attribute
 
 
 @router.get("/templates", response_model=list[TemplateOut], dependencies=[manager_guard])
