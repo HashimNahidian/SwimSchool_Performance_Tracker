@@ -102,26 +102,18 @@ export function listManagerEvaluations(token: string): Promise<EvaluationSummary
 }
 
 export type ManagerEvaluationQuery = {
-  instructor_id?: number | string;
-  supervisor_id?: number | string;
-  level_id?: number | string;
-  skill_id?: number | string;
-  rating_value?: number | string;
-  status?: "DRAFT" | "SUBMITTED" | string;
+  instructor_id?: number;
+  supervisor_id?: number;
+  level_id?: number;
+  skill_id?: number;
+  rating_value?: number;
+  status?: "DRAFT" | "SUBMITTED";
   date_from?: string;
   date_to?: string;
-  sort_by?:
-    | "id"
-    | "session_date"
-    | "submitted_at"
-    | "instructor_id"
-    | "supervisor_id"
-    | "level_id"
-    | "skill_id"
-    | string;
-  sort_dir?: "asc" | "desc" | string;
-  limit?: number | string;
-  offset?: number | string;
+  sort_by?: "id" | "session_date" | "submitted_at" | "instructor_id" | "supervisor_id" | "level_id" | "skill_id";
+  sort_dir?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
 };
 
 export function listManagerEvaluationsWithQuery(

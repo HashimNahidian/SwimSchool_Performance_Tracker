@@ -18,6 +18,7 @@ import {
   resolveSupervisorTemplate,
   refresh
 } from "./api";
+import type { ManagerEvaluationQuery } from "./api";
 import type { EvaluationSummary, Level, Skill, TemplateResolved, User, UserRole } from "./types";
 
 type AppTab = "dashboard" | "users" | "levels" | "skills" | "evaluations";
@@ -35,6 +36,62 @@ function Section({
       {children}
     </section>
   );
+}
+
+const MANAGER_SORT_FIELDS = new Set<NonNullable<ManagerEvaluationQuery["sort_by"]>>([
+  "id",
+  "session_date",
+  "submitted_at",
+  "instructor_id",
+  "supervisor_id",
+  "level_id",
+  "skill_id"
+]);
+
+function parsePositiveInt(value: string): number | undefined {
+  if (!value.trim()) return undefined;
+  const n = Number.parseInt(value, 10);
+  return Number.isNaN(n) ? undefined : n;
+}
+
+function buildManagerQueryFromFilters(filters: {
+  instructor_id: string;
+  supervisor_id: string;
+  level_id: string;
+  skill_id: string;
+  rating_value: string;
+  date_from: string;
+  date_to: string;
+  status: string;
+  sort_by: string;
+  sort_dir: string;
+  limit: string;
+  offset: string;
+}): ManagerEvaluationQuery {
+  const query: ManagerEvaluationQuery = {
+    limit: parsePositiveInt(filters.limit) ?? 50,
+    offset: parsePositiveInt(filters.offset) ?? 0
+  };
+  const instructorId = parsePositiveInt(filters.instructor_id);
+  const supervisorId = parsePositiveInt(filters.supervisor_id);
+  const levelId = parsePositiveInt(filters.level_id);
+  const skillId = parsePositiveInt(filters.skill_id);
+  const ratingValue = parsePositiveInt(filters.rating_value);
+  if (instructorId !== undefined) query.instructor_id = instructorId;
+  if (supervisorId !== undefined) query.supervisor_id = supervisorId;
+  if (levelId !== undefined) query.level_id = levelId;
+  if (skillId !== undefined) query.skill_id = skillId;
+  if (ratingValue !== undefined) query.rating_value = ratingValue;
+  if (filters.date_from) query.date_from = filters.date_from;
+  if (filters.date_to) query.date_to = filters.date_to;
+  if (filters.status === "DRAFT" || filters.status === "SUBMITTED") query.status = filters.status;
+  if (MANAGER_SORT_FIELDS.has(filters.sort_by as NonNullable<ManagerEvaluationQuery["sort_by"]>)) {
+    query.sort_by = filters.sort_by as NonNullable<ManagerEvaluationQuery["sort_by"]>;
+  } else {
+    query.sort_by = "submitted_at";
+  }
+  query.sort_dir = filters.sort_dir === "asc" ? "asc" : "desc";
+  return query;
 }
 
 export default function App() {
@@ -65,6 +122,12 @@ export default function App() {
     sort_dir: "desc",
     limit: "50",
     offset: "0"
+  });
+  const [appliedManagerQuery, setAppliedManagerQuery] = useState<ManagerEvaluationQuery>({
+    sort_by: "submitted_at",
+    sort_dir: "desc",
+    limit: 50,
+    offset: 0
   });
 
   const role = meUser?.role;
@@ -112,7 +175,7 @@ export default function App() {
         listUsers(token),
         listLevels(token),
         listSkills(token),
-        listManagerEvaluationsWithQuery(token, managerFilters)
+        listManagerEvaluationsWithQuery(token, appliedManagerQuery)
       ])
         .then(([nextUsers, nextLevels, nextSkills, nextEvaluations]) => {
           setUsers(nextUsers);
@@ -135,7 +198,20 @@ export default function App() {
         .then(setEvaluations)
         .catch((e: Error) => setError(e.message));
     }
-  }, [role, token, managerFilters]);
+  }, [role, token, appliedManagerQuery]);
+
+  function downloadCsv() {
+    if (!token) return;
+    fetch(exportEvaluationsCsvUrl(), { headers: authHeader }).then(async (resp) => {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "evaluations.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+  }
 
   function onLogout() {
     if (refreshToken) {
@@ -223,7 +299,12 @@ export default function App() {
             )}
           </nav>
           {tab === "dashboard" ? (
-            <ManagerDashboard rows={evaluations} onGo={setTab} />
+            <ManagerDashboard
+              rows={evaluations}
+              onGo={setTab}
+              onConfigureTemplates={() => setError("Template configuration page coming next.")}
+              onExport={downloadCsv}
+            />
           ) : null}
           {tab === "users" ? (
             <ManagerUsers
@@ -249,7 +330,13 @@ export default function App() {
           ) : null}
           {tab === "evaluations" ? (
             <Section title="All Evaluations">
-              <form className="form inline">
+              <form
+                className="form inline"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setAppliedManagerQuery(buildManagerQueryFromFilters(managerFilters));
+                }}
+              >
                 <input
                   placeholder="instructor id"
                   value={managerFilters.instructor_id}
@@ -358,6 +445,7 @@ export default function App() {
                   value={managerFilters.offset}
                   onChange={(e) => setManagerFilters((prev) => ({ ...prev, offset: e.target.value }))}
                 />
+                <button type="submit">Apply Filters</button>
               </form>
               <a
                 href={exportEvaluationsCsvUrl()}
@@ -367,15 +455,7 @@ export default function App() {
                 onClick={(e) => {
                   if (!token) return;
                   e.preventDefault();
-                  fetch(exportEvaluationsCsvUrl(), { headers: authHeader }).then(async (resp) => {
-                    const blob = await resp.blob();
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement("a");
-                    link.href = url;
-                    link.download = "evaluations.csv";
-                    link.click();
-                    URL.revokeObjectURL(url);
-                  });
+                  downloadCsv();
                 }}
               >
                 Export CSV
@@ -762,19 +842,25 @@ function EvaluationTable({ rows }: { rows: EvaluationSummary[] }) {
 
 function ManagerDashboard({
   rows,
-  onGo
+  onGo,
+  onConfigureTemplates,
+  onExport
 }: {
   rows: EvaluationSummary[];
   onGo: (tab: AppTab) => void;
+  onConfigureTemplates: () => void;
+  onExport: () => void;
 }) {
   const recent = rows.slice(0, 8);
   return (
     <Section title="Manager Dashboard">
       <div className="tabs">
         <button onClick={() => onGo("users")}>Manage Users</button>
+        <button onClick={onConfigureTemplates}>Configure Templates</button>
         <button onClick={() => onGo("levels")}>Manage Levels</button>
         <button onClick={() => onGo("skills")}>Manage Skills</button>
         <button onClick={() => onGo("evaluations")}>All Evaluations</button>
+        <button onClick={onExport}>Export/Email Evaluations</button>
       </div>
       <h3>Recently Completed Evaluations</h3>
       <table>
@@ -796,7 +882,7 @@ function ManagerDashboard({
               <td>{row.level_name}</td>
               <td>{row.submitted_at ?? "-"}</td>
               <td>{row.session_label}</td>
-              <td>No</td>
+              <td>-</td>
             </tr>
           ))}
         </tbody>
