@@ -709,6 +709,7 @@ function ManagerTemplates({
   const [levelId, setLevelId] = useState<number>(levels[0]?.id ?? 0);
   const [skillId, setSkillId] = useState<number>(0);
   const [selected, setSelected] = useState<Record<number, number>>({});
+  const [createError, setCreateError] = useState("");
 
   const levelSkills = skills.filter((x) => x.level_id === levelId);
 
@@ -727,7 +728,8 @@ function ManagerTemplates({
         delete next[attributeId];
         return next;
       }
-      return { ...prev, [attributeId]: Object.keys(prev).length + 1 };
+      const maxSortOrder = Object.values(prev).reduce((max, value) => (value > max ? value : max), 0);
+      return { ...prev, [attributeId]: maxSortOrder + 1 };
     });
   }
 
@@ -736,7 +738,19 @@ function ManagerTemplates({
     const attributesPayload = Object.entries(selected)
       .map(([attributeId, sortOrder]) => ({ attribute_id: Number(attributeId), sort_order: sortOrder }))
       .sort((a, b) => a.sort_order - b.sort_order);
-    if (!name.trim() || !levelId || !skillId || attributesPayload.length === 0) return;
+    if (!name.trim()) {
+      setCreateError("Template name is required.");
+      return;
+    }
+    if (!levelId || !skillId) {
+      setCreateError("Level and skill are required.");
+      return;
+    }
+    if (attributesPayload.length === 0) {
+      setCreateError("Select at least one criterion.");
+      return;
+    }
+    setCreateError("");
     const template = await createTemplate(token, {
       name: name.trim(),
       level_id: levelId,
@@ -795,6 +809,7 @@ function ManagerTemplates({
           })}
         </div>
         <button type="submit">Create Template</button>
+        {createError ? <p className="error">{createError}</p> : null}
       </form>
       <table>
         <thead>
