@@ -8,7 +8,7 @@ import {
   exportEvaluationsCsvUrl,
   listInstructorEvaluations,
   listLevels,
-  listManagerEvaluations,
+  listManagerEvaluationsWithQuery,
   listSkills,
   listSupervisorEvaluations,
   listUsers,
@@ -20,7 +20,7 @@ import {
 } from "./api";
 import type { EvaluationSummary, Level, Skill, TemplateResolved, User, UserRole } from "./types";
 
-type AppTab = "users" | "levels" | "skills" | "evaluations";
+type AppTab = "dashboard" | "users" | "levels" | "skills" | "evaluations";
 
 function Section({
   title,
@@ -46,12 +46,26 @@ export default function App() {
   );
   const [meUser, setMeUser] = useState<User | null>(null);
   const [error, setError] = useState<string>("");
-  const [tab, setTab] = useState<AppTab>("users");
+  const [tab, setTab] = useState<AppTab>("dashboard");
 
   const [users, setUsers] = useState<User[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
+  const [managerFilters, setManagerFilters] = useState({
+    instructor_id: "",
+    supervisor_id: "",
+    level_id: "",
+    skill_id: "",
+    rating_value: "",
+    date_from: "",
+    date_to: "",
+    status: "",
+    sort_by: "submitted_at",
+    sort_dir: "desc",
+    limit: "50",
+    offset: "0"
+  });
 
   const role = meUser?.role;
 
@@ -98,7 +112,7 @@ export default function App() {
         listUsers(token),
         listLevels(token),
         listSkills(token),
-        listManagerEvaluations(token)
+        listManagerEvaluationsWithQuery(token, managerFilters)
       ])
         .then(([nextUsers, nextLevels, nextSkills, nextEvaluations]) => {
           setUsers(nextUsers);
@@ -121,7 +135,7 @@ export default function App() {
         .then(setEvaluations)
         .catch((e: Error) => setError(e.message));
     }
-  }, [role, token]);
+  }, [role, token, managerFilters]);
 
   function onLogout() {
     if (refreshToken) {
@@ -196,7 +210,7 @@ export default function App() {
       {role === "MANAGER" ? (
         <>
           <nav className="tabs">
-            {(["users", "levels", "skills", "evaluations"] as AppTab[]).map(
+            {(["dashboard", "users", "levels", "skills", "evaluations"] as AppTab[]).map(
               (item) => (
                 <button
                   key={item}
@@ -208,6 +222,9 @@ export default function App() {
               )
             )}
           </nav>
+          {tab === "dashboard" ? (
+            <ManagerDashboard rows={evaluations} onGo={setTab} />
+          ) : null}
           {tab === "users" ? (
             <ManagerUsers
               token={token}
@@ -232,6 +249,116 @@ export default function App() {
           ) : null}
           {tab === "evaluations" ? (
             <Section title="All Evaluations">
+              <form className="form inline">
+                <input
+                  placeholder="instructor id"
+                  value={managerFilters.instructor_id}
+                  onChange={(e) =>
+                    setManagerFilters((prev) => ({ ...prev, instructor_id: e.target.value, offset: "0" }))
+                  }
+                />
+                <input
+                  placeholder="supervisor id"
+                  value={managerFilters.supervisor_id}
+                  onChange={(e) =>
+                    setManagerFilters((prev) => ({ ...prev, supervisor_id: e.target.value, offset: "0" }))
+                  }
+                />
+                <select
+                  value={managerFilters.level_id}
+                  onChange={(e) =>
+                    setManagerFilters((prev) => ({ ...prev, level_id: e.target.value, offset: "0" }))
+                  }
+                >
+                  <option value="">all levels</option>
+                  {levels.map((level) => (
+                    <option key={level.id} value={level.id}>
+                      {level.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={managerFilters.skill_id}
+                  onChange={(e) =>
+                    setManagerFilters((prev) => ({ ...prev, skill_id: e.target.value, offset: "0" }))
+                  }
+                >
+                  <option value="">all skills</option>
+                  {skills.map((skill) => (
+                    <option key={skill.id} value={skill.id}>
+                      {skill.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={managerFilters.rating_value}
+                  onChange={(e) =>
+                    setManagerFilters((prev) => ({ ...prev, rating_value: e.target.value, offset: "0" }))
+                  }
+                >
+                  <option value="">all ratings</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                </select>
+                <select
+                  value={managerFilters.status}
+                  onChange={(e) =>
+                    setManagerFilters((prev) => ({ ...prev, status: e.target.value, offset: "0" }))
+                  }
+                >
+                  <option value="">all statuses</option>
+                  <option value="DRAFT">DRAFT</option>
+                  <option value="SUBMITTED">SUBMITTED</option>
+                </select>
+                <input
+                  type="date"
+                  value={managerFilters.date_from}
+                  onChange={(e) =>
+                    setManagerFilters((prev) => ({ ...prev, date_from: e.target.value, offset: "0" }))
+                  }
+                />
+                <input
+                  type="date"
+                  value={managerFilters.date_to}
+                  onChange={(e) =>
+                    setManagerFilters((prev) => ({ ...prev, date_to: e.target.value, offset: "0" }))
+                  }
+                />
+                <select
+                  value={managerFilters.sort_by}
+                  onChange={(e) =>
+                    setManagerFilters((prev) => ({ ...prev, sort_by: e.target.value, offset: "0" }))
+                  }
+                >
+                  <option value="submitted_at">submitted_at</option>
+                  <option value="session_date">session_date</option>
+                  <option value="id">id</option>
+                  <option value="instructor_id">instructor_id</option>
+                  <option value="supervisor_id">supervisor_id</option>
+                  <option value="level_id">level_id</option>
+                  <option value="skill_id">skill_id</option>
+                </select>
+                <select
+                  value={managerFilters.sort_dir}
+                  onChange={(e) =>
+                    setManagerFilters((prev) => ({ ...prev, sort_dir: e.target.value, offset: "0" }))
+                  }
+                >
+                  <option value="desc">desc</option>
+                  <option value="asc">asc</option>
+                </select>
+                <input
+                  placeholder="limit"
+                  value={managerFilters.limit}
+                  onChange={(e) => setManagerFilters((prev) => ({ ...prev, limit: e.target.value }))}
+                />
+                <input
+                  placeholder="offset"
+                  value={managerFilters.offset}
+                  onChange={(e) => setManagerFilters((prev) => ({ ...prev, offset: e.target.value }))}
+                />
+              </form>
               <a
                 href={exportEvaluationsCsvUrl()}
                 target="_blank"
@@ -630,5 +757,50 @@ function EvaluationTable({ rows }: { rows: EvaluationSummary[] }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+function ManagerDashboard({
+  rows,
+  onGo
+}: {
+  rows: EvaluationSummary[];
+  onGo: (tab: AppTab) => void;
+}) {
+  const recent = rows.slice(0, 8);
+  return (
+    <Section title="Manager Dashboard">
+      <div className="tabs">
+        <button onClick={() => onGo("users")}>Manage Users</button>
+        <button onClick={() => onGo("levels")}>Manage Levels</button>
+        <button onClick={() => onGo("skills")}>Manage Skills</button>
+        <button onClick={() => onGo("evaluations")}>All Evaluations</button>
+      </div>
+      <h3>Recently Completed Evaluations</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Instructor</th>
+            <th>Supervisor</th>
+            <th>Level</th>
+            <th>Completion</th>
+            <th>Summary</th>
+            <th>Edited</th>
+          </tr>
+        </thead>
+        <tbody>
+          {recent.map((row) => (
+            <tr key={row.id}>
+              <td>{row.instructor_name}</td>
+              <td>{row.supervisor_name}</td>
+              <td>{row.level_name}</td>
+              <td>{row.submitted_at ?? "-"}</td>
+              <td>{row.session_label}</td>
+              <td>No</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Section>
   );
 }

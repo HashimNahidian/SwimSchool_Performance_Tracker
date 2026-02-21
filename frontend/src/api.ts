@@ -101,6 +101,43 @@ export function listManagerEvaluations(token: string): Promise<EvaluationSummary
   return request("/manager/evaluations", "GET", undefined, token);
 }
 
+export type ManagerEvaluationQuery = {
+  instructor_id?: number | string;
+  supervisor_id?: number | string;
+  level_id?: number | string;
+  skill_id?: number | string;
+  rating_value?: number | string;
+  status?: "DRAFT" | "SUBMITTED" | string;
+  date_from?: string;
+  date_to?: string;
+  sort_by?:
+    | "id"
+    | "session_date"
+    | "submitted_at"
+    | "instructor_id"
+    | "supervisor_id"
+    | "level_id"
+    | "skill_id"
+    | string;
+  sort_dir?: "asc" | "desc" | string;
+  limit?: number | string;
+  offset?: number | string;
+};
+
+export function listManagerEvaluationsWithQuery(
+  token: string,
+  query: ManagerEvaluationQuery
+): Promise<EvaluationSummary[]> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, String(value));
+    }
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return request(`/manager/evaluations${suffix}`, "GET", undefined, token);
+}
+
 export function listSupervisorEvaluations(token: string): Promise<EvaluationSummary[]> {
   return request("/supervisor/evaluations", "GET", undefined, token);
 }

@@ -1,13 +1,14 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import and_, select
+from sqlalchemy import and_, asc, desc, select
 from sqlalchemy.orm import Session, selectinload
 
 from db import get_db
 from deps import require_roles
 from models import (
     Evaluation,
+    EvaluationRating,
     EvaluationStatus,
     Level,
     Skill,
@@ -256,9 +257,14 @@ def list_evaluations(
     supervisor_id: int | None = None,
     level_id: int | None = None,
     skill_id: int | None = None,
+    rating_value: int | None = Query(default=None, ge=1, le=3),
     status_filter: EvaluationStatus | None = Query(default=None, alias="status"),
     date_from: date | None = None,
     date_to: date | None = None,
+    sort_by: str = Query(default="submitted_at"),
+    sort_dir: str = Query(default="desc"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> list[EvaluationSummaryOut]:
@@ -272,6 +278,11 @@ def list_evaluations(
         filters.append(Evaluation.level_id == level_id)
     if skill_id:
         filters.append(Evaluation.skill_id == skill_id)
+    if rating_value is not None:
+        rating_subq = select(EvaluationRating.evaluation_id).where(
+            EvaluationRating.rating_value == rating_value
+        )
+        filters.append(Evaluation.id.in_(rating_subq))
     if status_filter:
         filters.append(Evaluation.status == status_filter)
     if date_from:
@@ -280,7 +291,22 @@ def list_evaluations(
         filters.append(Evaluation.session_date <= date_to)
     if filters:
         stmt = stmt.where(and_(*filters))
-    evaluations = db.scalars(stmt).all()
+    sortable = {
+        "id": Evaluation.id,
+        "session_date": Evaluation.session_date,
+        "submitted_at": Evaluation.submitted_at,
+        "instructor_id": Evaluation.instructor_id,
+        "supervisor_id": Evaluation.supervisor_id,
+        "level_id": Evaluation.level_id,
+        "skill_id": Evaluation.skill_id,
+    }
+    if sort_by not in sortable:
+        raise HTTPException(status_code=400, detail="Invalid sort_by")
+    if sort_dir not in {"asc", "desc"}:
+        raise HTTPException(status_code=400, detail="Invalid sort_dir")
+    order_col = sortable[sort_by]
+    stmt = stmt.order_by(asc(order_col) if sort_dir == "asc" else desc(order_col), desc(Evaluation.id))
+    evaluations = db.scalars(stmt.limit(limit).offset(offset)).all()
     return [evaluation_summary_row(item) for item in evaluations]
 
 
