@@ -1,4 +1,6 @@
+import csv
 from datetime import date, datetime, timezone
+import io
 from pathlib import Path
 import sys
 
@@ -216,6 +218,9 @@ def test_manager_email_export_filters_are_school_scoped(
     assert response.json()["detail"] == "Email sent"
 
     csv_text = captured["csv"]
-    assert str(seeded["eval_a_id"]) not in csv_text
-    assert "School A Session" not in csv_text
-    assert csv_text.count("\n") == 1
+    rows = list(csv.DictReader(io.StringIO(csv_text)))
+
+    assert len(rows) == 0
+    assert all(row["session_label"] == "School B Session" for row in rows)
+    assert all(row["evaluation_id"] != str(seeded["eval_a_id"]) for row in rows)
+    assert all(row["session_label"] != "School A Session" for row in rows)
