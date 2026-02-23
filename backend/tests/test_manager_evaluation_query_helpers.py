@@ -128,6 +128,15 @@ def seed_two_school_evals(db: Session) -> dict[str, int]:
         submitted_at=datetime(2026, 2, 23, 10, 0, tzinfo=timezone.utc),
     )
     db.add_all([eval_a, eval_b])
+    db.flush()
+
+    attribute = models.Attribute(name="Rating Attribute", description="for rating filter tests", active=True)
+    db.add(attribute)
+    db.flush()
+
+    rating_a = models.EvaluationRating(evaluation_id=eval_a.id, attribute_id=attribute.id, rating_value=3)
+    rating_b = models.EvaluationRating(evaluation_id=eval_b.id, attribute_id=attribute.id, rating_value=1)
+    db.add_all([rating_a, rating_b])
     db.commit()
 
     return {
@@ -227,3 +236,26 @@ def test_apply_evaluation_sorting_submitted_at_desc_with_id_tiebreaker(db_sessio
     assert row_ids[0] == eval_b3.id
     assert row_ids[1] == eval_b2.id
     assert row_ids[-1] == seeded["eval_b_id"]
+
+
+def test_cross_tenant_rating_filter_returns_no_rows_for_school_scoped_base_stmt(db_session: Session):
+    seeded = seed_two_school_evals(db_session)
+
+    stmt = evaluation_query_with_joins(seeded["school_b_id"])
+    stmt = apply_evaluation_filters(stmt, rating_value=3)
+
+    rows = db_session.scalars(stmt).all()
+    assert len(rows) == 0
+    assert all(row.session_label != "School A Session" for row in rows)
+
+
+def test_rating_filter_returns_rows_for_own_tenant(db_session: Session):
+    seeded = seed_two_school_evals(db_session)
+
+    stmt = evaluation_query_with_joins(seeded["school_b_id"])
+    stmt = apply_evaluation_filters(stmt, rating_value=1)
+
+    rows = db_session.scalars(stmt).all()
+    assert len(rows) == 1
+    assert rows[0].session_label == "School B Session"
+    assert rows[0].id == seeded["eval_b_id"]
