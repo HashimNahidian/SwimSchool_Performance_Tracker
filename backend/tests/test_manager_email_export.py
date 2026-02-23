@@ -169,6 +169,7 @@ def seed_two_school_evals(db: Session) -> dict[str, int | str]:
         "eval_a_id": eval_a.id,
         "eval_b_id": eval_b.id,
         "instructor_a_id": instructor_a.id,
+        "instructor_b_id": instructor_b.id,
     }
 
 
@@ -224,3 +225,47 @@ def test_manager_email_export_filters_are_school_scoped(
     assert all(row["session_label"] == "School B Session" for row in rows)
     assert all(row["evaluation_id"] != str(seeded["eval_a_id"]) for row in rows)
     assert all(row["session_label"] != "School A Session" for row in rows)
+
+
+def test_manager_email_export_includes_rows_for_own_tenant(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    seeded = seed_two_school_evals(db_session)
+    manager_b_headers = auth_headers(client, str(seeded["manager_b_email"]))
+
+    captured: dict[str, str] = {}
+
+    def fake_send_csv_email(
+        recipients: list[str],
+        subject: str,
+        message: str,
+        csv_text: str,
+    ) -> None:
+        captured["csv"] = csv_text
+
+    monkeypatch.setattr("routers.manager.send_csv_email", fake_send_csv_email)
+
+    response = client.post(
+        "/manager/exports/evaluations/email",
+        headers=manager_b_headers,
+        json={
+            "to": ["recipient@example.com"],
+            "filters": {
+                "instructor_id": seeded["instructor_b_id"],
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["detail"] == "Email sent"
+
+    csv_text = captured["csv"]
+    rows = list(csv.DictReader(io.StringIO(csv_text)))
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["session_label"] == "School B Session"
+    assert "School A Session" not in row.values()
+    assert row["evaluation_id"] == str(seeded["eval_b_id"])
+    assert row["evaluation_id"] != str(seeded["eval_a_id"])
