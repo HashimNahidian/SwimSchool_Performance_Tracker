@@ -6,6 +6,7 @@ import {
   createSupervisorEvaluation,
   createTemplate,
   createUser,
+  emailEvaluationsCsv,
   exportEvaluationsCsvUrl,
   listAttributes,
   listInstructorEvaluations,
@@ -232,6 +233,16 @@ export default function App() {
     });
   }
 
+  async function sendCsvEmail(payload: {
+    to: string[];
+    subject?: string;
+    message?: string;
+    filters?: ManagerEvaluationQuery;
+  }) {
+    if (!token) return;
+    await emailEvaluationsCsv(token, payload);
+  }
+
   function onLogout() {
     if (refreshToken) {
       logout(refreshToken).catch(() => undefined);
@@ -322,7 +333,9 @@ export default function App() {
               rows={evaluations}
               onGo={setTab}
               onConfigureTemplates={() => setTab("templates")}
-              onExport={downloadCsv}
+              onExportCsv={downloadCsv}
+              onEmailCsv={sendCsvEmail}
+              appliedManagerQuery={appliedManagerQuery}
             />
           ) : null}
           {tab === "users" ? (
@@ -1043,14 +1056,61 @@ function ManagerDashboard({
   rows,
   onGo,
   onConfigureTemplates,
-  onExport
+  onExportCsv,
+  onEmailCsv,
+  appliedManagerQuery
 }: {
   rows: EvaluationSummary[];
   onGo: (tab: AppTab) => void;
   onConfigureTemplates: () => void;
-  onExport: () => void;
+  onExportCsv: () => void;
+  onEmailCsv: (payload: {
+    to: string[];
+    subject?: string;
+    message?: string;
+    filters?: ManagerEvaluationQuery;
+  }) => Promise<void>;
+  appliedManagerQuery: ManagerEvaluationQuery;
 }) {
   const recent = rows.slice(0, 8);
+  const [showEmail, setShowEmail] = useState(false);
+  const [toText, setToText] = useState("");
+  const [subject, setSubject] = useState("Propel Swim Evaluations Export");
+  const [message, setMessage] = useState("");
+  const [useCurrentFilters, setUseCurrentFilters] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [emailStatus, setEmailStatus] = useState("");
+
+  async function onSubmitEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const recipients = toText
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    if (recipients.length === 0) {
+      setEmailStatus("At least one recipient is required.");
+      return;
+    }
+    setSending(true);
+    setEmailStatus("");
+    try {
+      await onEmailCsv({
+        to: recipients,
+        subject: subject.trim() || "Propel Swim Evaluations Export",
+        message: message.trim() || undefined,
+        filters: useCurrentFilters ? appliedManagerQuery : undefined
+      });
+      setEmailStatus("Email sent.");
+      setToText("");
+      setMessage("");
+      setUseCurrentFilters(false);
+    } catch (e) {
+      setEmailStatus((e as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <Section title="Manager Dashboard">
       <div className="tabs">
@@ -1059,8 +1119,44 @@ function ManagerDashboard({
         <button onClick={() => onGo("levels")}>Manage Levels</button>
         <button onClick={() => onGo("skills")}>Manage Skills</button>
         <button onClick={() => onGo("evaluations")}>All Evaluations</button>
-        <button onClick={onExport}>Export/Email Evaluations</button>
+        <button onClick={onExportCsv}>Export CSV</button>
+        <button onClick={() => setShowEmail((prev) => !prev)}>Email CSV</button>
       </div>
+      {showEmail ? (
+        <form className="form" onSubmit={onSubmitEmail}>
+          <label>
+            To (comma-separated)
+            <input
+              value={toText}
+              onChange={(e) => setToText(e.target.value)}
+              placeholder="someone@example.com, other@example.com"
+              required
+            />
+          </label>
+          <label>
+            Subject
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} />
+          </label>
+          <label>
+            Message
+            <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={3} />
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={useCurrentFilters}
+              onChange={(e) => setUseCurrentFilters(e.target.checked)}
+            />
+            Use current filters from All Evaluations
+          </label>
+          <button type="submit" disabled={sending}>
+            {sending ? "Sending..." : "Send"}
+          </button>
+          {emailStatus ? (
+            <p className={emailStatus === "Email sent." ? "" : "error"}>{emailStatus}</p>
+          ) : null}
+        </form>
+      ) : null}
       <h3>Recently Completed Evaluations</h3>
       <table>
         <thead>

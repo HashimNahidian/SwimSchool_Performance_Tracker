@@ -19,6 +19,12 @@ class Settings:
     login_rate_limit_count: int
     login_rate_limit_window_seconds: int
     enable_audit_log: bool
+    smtp_host: str | None
+    smtp_port: int
+    smtp_username: str | None
+    smtp_password: str | None
+    smtp_from_email: str | None
+    smtp_use_tls: bool
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -51,4 +57,10 @@ settings = Settings(
     login_rate_limit_count=int(os.getenv("LOGIN_RATE_LIMIT_COUNT", "10")),
     login_rate_limit_window_seconds=int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "60")),
     enable_audit_log=_bool_env("ENABLE_AUDIT_LOG", True),
+    smtp_host=os.getenv("SMTP_HOST"),
+    smtp_port=int(os.getenv("SMTP_PORT", "587")),
+    smtp_username=os.getenv("SMTP_USERNAME"),
+    smtp_password=os.getenv("SMTP_PASSWORD"),
+    smtp_from_email=os.getenv("SMTP_FROM_EMAIL"),
+    smtp_use_tls=_bool_env("SMTP_USE_TLS", True),
 )

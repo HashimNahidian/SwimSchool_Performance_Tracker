@@ -206,3 +206,15 @@ export function resolveSupervisorTemplate(
 export function exportEvaluationsCsvUrl(): string {
   return `${API_BASE_URL}/manager/exports/evaluations.csv`;
 }
+
+export function emailEvaluationsCsv(
+  token: string,
+  payload: {
+    to: string[];
+    subject?: string;
+    message?: string;
+    filters?: ManagerEvaluationQuery;
+  }
+): Promise<{ detail: string }> {
+  return request("/manager/exports/evaluations/email", "POST", payload, token);
+}

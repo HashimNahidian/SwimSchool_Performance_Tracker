@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from models import EvaluationStatus, UserRole
 
@@ -172,3 +172,25 @@ class RatingOut(BaseModel):
 class EvaluationDetailOut(EvaluationSummaryOut):
     notes: str | None
     ratings: list[RatingOut]
+
+
+class EvaluationFilterIn(BaseModel):
+    instructor_id: int | None = None
+    supervisor_id: int | None = None
+    level_id: int | None = None
+    skill_id: int | None = None
+    rating_value: int | None = Field(default=None, ge=1, le=3)
+    status: EvaluationStatus | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    sort_by: str | None = None
+    sort_dir: str | None = None
+    limit: int | None = Field(default=None, ge=1, le=200)
+    offset: int | None = Field(default=None, ge=0)
+
+
+class ExportEmailRequest(BaseModel):
+    to: list[EmailStr] = Field(min_length=1)
+    subject: str | None = Field(default=None, max_length=200)
+    message: str | None = Field(default=None, max_length=4000)
+    filters: EvaluationFilterIn | None = None
