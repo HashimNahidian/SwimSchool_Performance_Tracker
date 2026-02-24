@@ -1,76 +1,76 @@
 export type UserRole = "MANAGER" | "SUPERVISOR" | "INSTRUCTOR";
-export type EvaluationStatus = "DRAFT" | "SUBMITTED";
 
-export interface User {
+export type User = {
   id: number;
   name: string;
   email: string;
   role: UserRole;
   active: boolean;
-}
+};
 
-export interface Level {
+export type TokenResponse = {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+};
+
+export type Level = {
   id: number;
   name: string;
   active: boolean;
-}
+};
 
-export interface Skill {
+export type Skill = {
   id: number;
   level_id: number;
   name: string;
+  description: string | null;
   active: boolean;
-}
+};
 
-export interface Attribute {
+export type Attribute = {
   id: number;
   name: string;
   description: string | null;
   active: boolean;
-}
+};
 
-export interface TemplateAttribute {
+export type EvaluationSummary = {
+  id: number;
+  instructor_id: number;
+  instructor_name: string;
+  supervisor_id: number;
+  supervisor_name: string;
+  level_id: number;
+  level_name: string;
+  skill_id: number;
+  skill_name: string;
+  session_label: string;
+  session_date: string;
+  status: "DRAFT" | "SUBMITTED";
+  submitted_at: string | null;
+};
+
+export type TemplateCriterion = {
   attribute_id: number;
+  attribute_name: string;
   sort_order: number;
-}
+};
 
-export interface Template {
+export type TemplateResolved = {
   id: number;
   name: string;
   level_id: number | null;
   skill_id: number | null;
   active: boolean;
-  template_attributes: TemplateAttribute[];
-}
+  attributes: TemplateCriterion[];
+};
 
-export interface EvaluationRating {
-  attribute_id: number;
-  rating_value: number;
-}
-
-export interface Evaluation {
+export type TemplateConfig = {
   id: number;
-  instructor_id: number;
-  supervisor_id: number;
+  name: string;
   level_id: number | null;
   skill_id: number | null;
-  session_label: string | null;
-  session_date: string;
-  notes: string | null;
-  status: EvaluationStatus;
-  created_at: string;
-  submitted_at: string | null;
-  ratings: EvaluationRating[];
-}
-
-export interface TrendPoint {
-  period: string;
-  evaluation_count: number;
-  average_rating: number;
-}
-
-export interface LoginResponse {
-  access_token: string;
-  token_type: string;
-  user: User;
-}
+  active: boolean;
+  attributes: TemplateCriterion[];
+};

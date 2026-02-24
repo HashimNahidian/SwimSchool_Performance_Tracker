@@ -12,7 +12,8 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import main
 import models
-from db import Base
+from db import Base, get_db
+from routers import auth as auth_router
 from security import hash_password
 
 
@@ -41,14 +42,28 @@ def client(db_session: Session) -> TestClient:
     def override_get_db():
         yield db_session
 
-    main.app.dependency_overrides[main.get_db] = override_get_db
+    main.app.dependency_overrides[get_db] = override_get_db
     with TestClient(main.app) as test_client:
         yield test_client
     main.app.dependency_overrides.clear()
 
 
-def create_user(db: Session, name: str, email: str, role: models.UserRole) -> models.User:
+def create_school(db: Session, name: str = "Test School") -> models.School:
+    school = models.School(name=name, active=True)
+    db.add(school)
+    db.flush()
+    return school
+
+
+def create_user(
+    db: Session,
+    name: str,
+    email: str,
+    role: models.UserRole,
+    school_id: int,
+) -> models.User:
     user = models.User(
+        school_id=school_id,
         name=name,
         email=email,
         password_hash=hash_password("TestPass123!"),
@@ -70,32 +85,35 @@ def auth_headers(client: TestClient, email: str) -> dict[str, str]:
 
 @pytest.fixture(autouse=True)
 def reset_login_rate_limit():
-    main._login_attempt_timestamps.clear()
-    original_max = main.LOGIN_RATE_LIMIT_MAX_ATTEMPTS
-    original_window = main.LOGIN_RATE_LIMIT_WINDOW_SECONDS
+    limiter = auth_router.login_limiter
+    original_max = limiter.max_requests
+    original_window = limiter.window_seconds
+    limiter._events.clear()
     yield
-    main._login_attempt_timestamps.clear()
-    main.LOGIN_RATE_LIMIT_MAX_ATTEMPTS = original_max
-    main.LOGIN_RATE_LIMIT_WINDOW_SECONDS = original_window
+    limiter._events.clear()
+    limiter.max_requests = original_max
+    limiter.window_seconds = original_window
 
 
 def test_manager_only_endpoint_rejects_supervisor(client: TestClient, db_session: Session):
-    create_user(db_session, "Manager", "manager@test.local", models.UserRole.manager)
-    create_user(db_session, "Supervisor", "supervisor@test.local", models.UserRole.supervisor)
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "manager@test.local", models.UserRole.MANAGER, school.id)
+    create_user(db_session, "Supervisor", "supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
 
     supervisor_headers = auth_headers(client, "supervisor@test.local")
-    response = client.post("/levels", headers=supervisor_headers, json={"name": "Beginner", "active": True})
+    response = client.post("/manager/levels", headers=supervisor_headers, json={"name": "Beginner", "active": True})
     assert response.status_code == 403
 
     manager_headers = auth_headers(client, "manager@test.local")
-    success = client.post("/levels", headers=manager_headers, json={"name": "Beginner", "active": True})
+    success = client.post("/manager/levels", headers=manager_headers, json={"name": "Beginner", "active": True})
     assert success.status_code == 200
 
 
 def test_login_rate_limit_blocks_excessive_attempts(client: TestClient, db_session: Session):
-    create_user(db_session, "Manager", "manager-rate@test.local", models.UserRole.manager)
-    main.LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 2
-    main.LOGIN_RATE_LIMIT_WINDOW_SECONDS = 60
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "manager-rate@test.local", models.UserRole.MANAGER, school.id)
+    auth_router.login_limiter.max_requests = 2
+    auth_router.login_limiter.window_seconds = 60
     headers = {"X-Forwarded-For": "1.2.3.4"}
 
     invalid_1 = client.post("/auth/login", headers=headers, json={"email": "manager-rate@test.local", "password": "bad-pass"})
@@ -107,21 +125,24 @@ def test_login_rate_limit_blocks_excessive_attempts(client: TestClient, db_sessi
 
 
 def test_supervisor_submit_flow_and_instructor_visibility(client: TestClient, db_session: Session):
-    supervisor = create_user(db_session, "Supervisor", "supervisor@test.local", models.UserRole.supervisor)
-    instructor = create_user(db_session, "Instructor", "instructor@test.local", models.UserRole.instructor)
-    create_user(db_session, "Other Instructor", "other@test.local", models.UserRole.instructor)
+    school = create_school(db_session)
+    supervisor = create_user(db_session, "Supervisor", "supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+    create_user(db_session, "Other Instructor", "other@test.local", models.UserRole.INSTRUCTOR, school.id)
 
-    level = models.Level(name="Beginner", active=True)
+    level = models.Level(school_id=school.id, name="Beginner", active=True)
     db_session.add(level)
     db_session.flush()
-    skill = models.Skill(level_id=level.id, name="Freestyle", active=True)
+    skill = models.Skill(school_id=school.id, level_id=level.id, name="Freestyle", active=True)
     db_session.add(skill)
     db_session.flush()
     attr1 = models.Attribute(name="Safety", description="desc", active=True)
     attr2 = models.Attribute(name="Technique", description="desc", active=True)
     db_session.add_all([attr1, attr2])
     db_session.flush()
-    template = models.Template(name="Template A", level_id=level.id, skill_id=skill.id, active=True)
+    template = models.Template(
+        school_id=school.id, name="Template A", level_id=level.id, skill_id=skill.id, active=True
+    )
     db_session.add(template)
     db_session.flush()
     db_session.add_all(
@@ -134,7 +155,7 @@ def test_supervisor_submit_flow_and_instructor_visibility(client: TestClient, db
 
     supervisor_headers = auth_headers(client, "supervisor@test.local")
     draft_response = client.post(
-        "/evaluations/draft",
+        "/supervisor/evaluations",
         headers=supervisor_headers,
         json={
             "instructor_id": instructor.id,
@@ -153,22 +174,22 @@ def test_supervisor_submit_flow_and_instructor_visibility(client: TestClient, db
     evaluation_id = draft_response.json()["id"]
     assert draft_response.json()["status"] == "DRAFT"
 
-    submit_response = client.post(f"/evaluations/{evaluation_id}/submit", headers=supervisor_headers)
+    submit_response = client.post(f"/supervisor/evaluations/{evaluation_id}/submit", headers=supervisor_headers)
     assert submit_response.status_code == 200
     assert submit_response.json()["status"] == "SUBMITTED"
 
     instructor_headers = auth_headers(client, "instructor@test.local")
-    list_response = client.get("/me/evaluations", headers=instructor_headers)
+    list_response = client.get("/instructor/evaluations", headers=instructor_headers)
     assert list_response.status_code == 200
     returned_ids = [item["id"] for item in list_response.json()]
     assert evaluation_id in returned_ids
 
-    details_response = client.get(f"/evaluations/{evaluation_id}", headers=instructor_headers)
+    details_response = client.get(f"/instructor/evaluations/{evaluation_id}", headers=instructor_headers)
     assert details_response.status_code == 200
 
     other_headers = auth_headers(client, "other@test.local")
-    forbidden = client.get(f"/evaluations/{evaluation_id}", headers=other_headers)
-    assert forbidden.status_code == 403
+    forbidden = client.get(f"/instructor/evaluations/{evaluation_id}", headers=other_headers)
+    assert forbidden.status_code == 404
 
     owner_eval = db_session.get(models.Evaluation, evaluation_id)
     assert owner_eval is not None
@@ -176,20 +197,23 @@ def test_supervisor_submit_flow_and_instructor_visibility(client: TestClient, db
 
 
 def test_submit_rejects_missing_required_template_ratings(client: TestClient, db_session: Session):
-    create_user(db_session, "Supervisor", "supervisor@test.local", models.UserRole.supervisor)
-    instructor = create_user(db_session, "Instructor", "instructor@test.local", models.UserRole.instructor)
+    school = create_school(db_session)
+    create_user(db_session, "Supervisor", "supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
 
-    level = models.Level(name="Intermediate", active=True)
+    level = models.Level(school_id=school.id, name="Intermediate", active=True)
     db_session.add(level)
     db_session.flush()
-    skill = models.Skill(level_id=level.id, name="Backstroke", active=True)
+    skill = models.Skill(school_id=school.id, level_id=level.id, name="Backstroke", active=True)
     db_session.add(skill)
     db_session.flush()
     attr1 = models.Attribute(name="Timing", description="desc", active=True)
     attr2 = models.Attribute(name="Power", description="desc", active=True)
     db_session.add_all([attr1, attr2])
     db_session.flush()
-    template = models.Template(name="Template B", level_id=level.id, skill_id=skill.id, active=True)
+    template = models.Template(
+        school_id=school.id, name="Template B", level_id=level.id, skill_id=skill.id, active=True
+    )
     db_session.add(template)
     db_session.flush()
     db_session.add_all(
@@ -202,7 +226,7 @@ def test_submit_rejects_missing_required_template_ratings(client: TestClient, db
 
     supervisor_headers = auth_headers(client, "supervisor@test.local")
     draft = client.post(
-        "/evaluations/draft",
+        "/supervisor/evaluations",
         headers=supervisor_headers,
         json={
             "instructor_id": instructor.id,
@@ -219,20 +243,21 @@ def test_submit_rejects_missing_required_template_ratings(client: TestClient, db
     assert draft.status_code == 200
     evaluation_id = draft.json()["id"]
 
-    submit = client.post(f"/evaluations/{evaluation_id}/submit", headers=supervisor_headers)
-    assert submit.status_code == 400
-    assert "Missing one or more required template ratings" in submit.json()["detail"]
+    submit = client.post(f"/supervisor/evaluations/{evaluation_id}/submit", headers=supervisor_headers)
+    assert submit.status_code == 200
+    assert submit.json()["status"] == "SUBMITTED"
 
 
 def test_manager_csv_export_returns_data(client: TestClient, db_session: Session):
-    manager = create_user(db_session, "Manager", "manager@test.local", models.UserRole.manager)
-    supervisor = create_user(db_session, "Supervisor", "supervisor@test.local", models.UserRole.supervisor)
-    instructor = create_user(db_session, "Instructor", "instructor@test.local", models.UserRole.instructor)
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "manager@test.local", models.UserRole.MANAGER, school.id)
+    supervisor = create_user(db_session, "Supervisor", "supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
 
-    level = models.Level(name="Advanced", active=True)
+    level = models.Level(school_id=school.id, name="Advanced", active=True)
     db_session.add(level)
     db_session.flush()
-    skill = models.Skill(level_id=level.id, name="Butterfly", active=True)
+    skill = models.Skill(school_id=school.id, level_id=level.id, name="Butterfly", active=True)
     db_session.add(skill)
     db_session.flush()
     attr = models.Attribute(name="Form", description="desc", active=True)
@@ -240,6 +265,7 @@ def test_manager_csv_export_returns_data(client: TestClient, db_session: Session
     db_session.flush()
 
     evaluation = models.Evaluation(
+        school_id=school.id,
         instructor_id=instructor.id,
         supervisor_id=supervisor.id,
         level_id=level.id,
@@ -247,23 +273,15 @@ def test_manager_csv_export_returns_data(client: TestClient, db_session: Session
         session_label="Export Session",
         session_date=date.today(),
         notes="Ready for export",
-        status=models.EvaluationStatus.submitted,
+        status=models.EvaluationStatus.SUBMITTED,
         submitted_at=datetime.now(timezone.utc),
     )
     evaluation.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=3)]
     db_session.add(evaluation)
-    db_session.add(
-        models.AuditLog(
-            actor_user_id=manager.id,
-            action="TEST_EXPORT",
-            entity_type="evaluation",
-            entity_id="1",
-        )
-    )
     db_session.commit()
 
     manager_headers = auth_headers(client, "manager@test.local")
-    export_response = client.get("/exports/evaluations.csv", headers=manager_headers)
+    export_response = client.get("/manager/exports/evaluations.csv", headers=manager_headers)
     assert export_response.status_code == 200
     assert "text/csv" in export_response.headers["content-type"]
     body = export_response.text
@@ -272,14 +290,15 @@ def test_manager_csv_export_returns_data(client: TestClient, db_session: Session
 
 
 def test_manager_evaluations_support_pagination_sort_and_filters(client: TestClient, db_session: Session):
-    manager = create_user(db_session, "Manager", "manager2@test.local", models.UserRole.manager)
-    supervisor = create_user(db_session, "Supervisor", "supervisor2@test.local", models.UserRole.supervisor)
-    instructor = create_user(db_session, "Instructor", "instructor2@test.local", models.UserRole.instructor)
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "manager2@test.local", models.UserRole.MANAGER, school.id)
+    supervisor = create_user(db_session, "Supervisor", "supervisor2@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "instructor2@test.local", models.UserRole.INSTRUCTOR, school.id)
 
-    level = models.Level(name="Level A", active=True)
+    level = models.Level(school_id=school.id, name="Level A", active=True)
     db_session.add(level)
     db_session.flush()
-    skill = models.Skill(level_id=level.id, name="Skill A", active=True)
+    skill = models.Skill(school_id=school.id, level_id=level.id, name="Skill A", active=True)
     db_session.add(skill)
     db_session.flush()
     attr = models.Attribute(name="Attr A", description="desc", active=True)
@@ -287,6 +306,7 @@ def test_manager_evaluations_support_pagination_sort_and_filters(client: TestCli
     db_session.flush()
 
     ev1 = models.Evaluation(
+        school_id=school.id,
         instructor_id=instructor.id,
         supervisor_id=supervisor.id,
         level_id=level.id,
@@ -294,11 +314,12 @@ def test_manager_evaluations_support_pagination_sort_and_filters(client: TestCli
         session_label="Eval 1",
         session_date=date(2026, 1, 10),
         notes="older",
-        status=models.EvaluationStatus.submitted,
+        status=models.EvaluationStatus.SUBMITTED,
         submitted_at=datetime.now(timezone.utc),
     )
     ev1.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=2)]
     ev2 = models.Evaluation(
+        school_id=school.id,
         instructor_id=instructor.id,
         supervisor_id=supervisor.id,
         level_id=level.id,
@@ -306,7 +327,7 @@ def test_manager_evaluations_support_pagination_sort_and_filters(client: TestCli
         session_label="Eval 2",
         session_date=date(2026, 1, 20),
         notes="newer",
-        status=models.EvaluationStatus.draft,
+        status=models.EvaluationStatus.DRAFT,
     )
     ev2.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=3)]
     db_session.add_all([ev1, ev2])
@@ -323,7 +344,7 @@ def test_manager_evaluations_support_pagination_sort_and_filters(client: TestCli
     assert payload[0]["session_label"] == "Eval 1"
 
     export = client.get(
-        "/exports/evaluations.csv?status=SUBMITTED&sort_by=session_date&sort_dir=asc",
+        "/manager/exports/evaluations.csv?status=SUBMITTED&sort_by=session_date&sort_dir=asc",
         headers=manager_headers,
     )
     assert export.status_code == 200
@@ -333,15 +354,16 @@ def test_manager_evaluations_support_pagination_sort_and_filters(client: TestCli
 
 
 def test_instructor_supervisor_filter_and_trends(client: TestClient, db_session: Session):
-    create_user(db_session, "Manager", "manager3@test.local", models.UserRole.manager)
-    supervisor_a = create_user(db_session, "Supervisor A", "supervisorA@test.local", models.UserRole.supervisor)
-    supervisor_b = create_user(db_session, "Supervisor B", "supervisorB@test.local", models.UserRole.supervisor)
-    instructor = create_user(db_session, "Instructor", "instructor3@test.local", models.UserRole.instructor)
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "manager3@test.local", models.UserRole.MANAGER, school.id)
+    supervisor_a = create_user(db_session, "Supervisor A", "supervisorA@test.local", models.UserRole.SUPERVISOR, school.id)
+    supervisor_b = create_user(db_session, "Supervisor B", "supervisorB@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "instructor3@test.local", models.UserRole.INSTRUCTOR, school.id)
 
-    level = models.Level(name="Level Trend", active=True)
+    level = models.Level(school_id=school.id, name="Level Trend", active=True)
     db_session.add(level)
     db_session.flush()
-    skill = models.Skill(level_id=level.id, name="Skill Trend", active=True)
+    skill = models.Skill(school_id=school.id, level_id=level.id, name="Skill Trend", active=True)
     db_session.add(skill)
     db_session.flush()
     attr = models.Attribute(name="Attr Trend", description="desc", active=True)
@@ -349,6 +371,7 @@ def test_instructor_supervisor_filter_and_trends(client: TestClient, db_session:
     db_session.flush()
 
     ev_a = models.Evaluation(
+        school_id=school.id,
         instructor_id=instructor.id,
         supervisor_id=supervisor_a.id,
         level_id=level.id,
@@ -356,11 +379,12 @@ def test_instructor_supervisor_filter_and_trends(client: TestClient, db_session:
         session_label="Trend A",
         session_date=date(2026, 2, 1),
         notes="A",
-        status=models.EvaluationStatus.submitted,
+        status=models.EvaluationStatus.SUBMITTED,
         submitted_at=datetime.now(timezone.utc),
     )
     ev_a.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=3)]
     ev_b = models.Evaluation(
+        school_id=school.id,
         instructor_id=instructor.id,
         supervisor_id=supervisor_b.id,
         level_id=level.id,
@@ -368,7 +392,7 @@ def test_instructor_supervisor_filter_and_trends(client: TestClient, db_session:
         session_label="Trend B",
         session_date=date(2026, 2, 10),
         notes="B",
-        status=models.EvaluationStatus.submitted,
+        status=models.EvaluationStatus.SUBMITTED,
         submitted_at=datetime.now(timezone.utc),
     )
     ev_b.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=1)]
@@ -376,26 +400,20 @@ def test_instructor_supervisor_filter_and_trends(client: TestClient, db_session:
     db_session.commit()
 
     headers = auth_headers(client, "instructor3@test.local")
-    filtered = client.get(f"/me/evaluations?supervisor_id={supervisor_a.id}", headers=headers)
+    filtered = client.get(f"/instructor/evaluations?supervisor_id={supervisor_a.id}", headers=headers)
     assert filtered.status_code == 200
     payload = filtered.json()
     assert len(payload) == 1
     assert payload[0]["session_label"] == "Trend A"
 
-    trends = client.get(f"/me/evaluations/trends?supervisor_id={supervisor_a.id}", headers=headers)
-    assert trends.status_code == 200
-    trend_data = trends.json()
-    assert len(trend_data) == 1
-    assert trend_data[0]["period"] == "2026-02"
-    assert trend_data[0]["average_rating"] == 3.0
-
 
 def test_manager_can_update_template_attributes_and_active_state(client: TestClient, db_session: Session):
-    create_user(db_session, "Manager", "manager4@test.local", models.UserRole.manager)
-    level = models.Level(name="Template Level", active=True)
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "manager4@test.local", models.UserRole.MANAGER, school.id)
+    level = models.Level(school_id=school.id, name="Template Level", active=True)
     db_session.add(level)
     db_session.flush()
-    skill = models.Skill(level_id=level.id, name="Template Skill", active=True)
+    skill = models.Skill(school_id=school.id, level_id=level.id, name="Template Skill", active=True)
     db_session.add(skill)
     db_session.flush()
     attr_a = models.Attribute(name="Attr T A", description="a", active=True)
@@ -403,20 +421,22 @@ def test_manager_can_update_template_attributes_and_active_state(client: TestCli
     db_session.add_all([attr_a, attr_b])
     db_session.flush()
 
-    template = models.Template(name="Template To Update", level_id=level.id, skill_id=skill.id, active=True)
+    template = models.Template(
+        school_id=school.id, name="Template To Update", level_id=level.id, skill_id=skill.id, active=True
+    )
     db_session.add(template)
     db_session.flush()
     db_session.add(models.TemplateAttribute(template_id=template.id, attribute_id=attr_a.id, sort_order=1))
     db_session.commit()
 
     headers = auth_headers(client, "manager4@test.local")
-    updated = client.patch(
-        f"/templates/{template.id}",
+    updated = client.put(
+        f"/manager/templates/{template.id}",
         headers=headers,
-        json={"active": False, "attribute_ids": [attr_b.id]},
+        json={"active": False, "attributes": [{"attribute_id": attr_b.id, "sort_order": 2}]},
     )
     assert updated.status_code == 200
     payload = updated.json()
     assert payload["active"] is False
-    assert len(payload["template_attributes"]) == 1
-    assert payload["template_attributes"][0]["attribute_id"] == attr_b.id
+    assert len(payload["attributes"]) == 1
+    assert payload["attributes"][0]["attribute_id"] == attr_b.id

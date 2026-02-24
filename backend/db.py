@@ -1,22 +1,19 @@
-import os
+from collections.abc import Generator
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg2://propel:propelpass@localhost:5432/propel_eval",
-)
+from config import settings
 
-SQL_ECHO = os.getenv("SQL_ECHO", "false").lower() == "true"
-
-engine = create_engine(DATABASE_URL, echo=SQL_ECHO)
+engine = create_engine(settings.database_url, echo=False, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
 
 class Base(DeclarativeBase):
     pass
 
 
-def get_db():
+def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db

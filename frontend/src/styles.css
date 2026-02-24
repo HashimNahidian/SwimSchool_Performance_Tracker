@@ -1,7 +1,7 @@
 :root {
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   color: #0f172a;
-  background: #f8fafc;
+  background: linear-gradient(160deg, #e2f2fb 0%, #f8fbff 40%, #ebf8f3 100%);
 }
 
 * {
@@ -12,103 +12,110 @@ body {
   margin: 0;
 }
 
-.app-shell {
-  min-height: 100vh;
+.layout {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  display: grid;
+  gap: 16px;
 }
 
-.topbar {
+.auth {
+  min-height: 100vh;
+  place-items: center;
+}
+
+.header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.5rem;
-  background: #0b3c5d;
-  color: #fff;
+  align-items: flex-start;
+  gap: 16px;
 }
 
-.topbar h1 {
-  margin: 0;
-  font-size: 1.2rem;
+.card {
+  background: #ffffff;
+  border: 1px solid #dbe8f4;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
 }
 
-.topbar-right {
+.tabs {
   display: flex;
-  gap: 0.75rem;
-  align-items: center;
+  gap: 8px;
 }
 
-.nav {
-  display: flex;
-  gap: 1rem;
-  padding: 0.8rem 1.5rem;
-  border-bottom: 1px solid #dbe3ef;
-  background: #fff;
+.tabs button.active {
+  background: #0a7a59;
 }
 
-.nav a {
-  color: #0b3c5d;
-  text-decoration: none;
-  font-weight: 600;
-}
-
-.content {
-  padding: 1.2rem 1.5rem;
-}
-
-.stack {
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-}
-
-.panel {
-  background: #fff;
-  border: 1px solid #dbe3ef;
+button,
+.button-link {
+  background: #0f766e;
+  color: white;
+  border: none;
   border-radius: 8px;
-  padding: 1rem;
+  padding: 8px 12px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
 }
 
-.panel.narrow {
-  max-width: 420px;
+button:hover,
+.button-link:hover {
+  background: #0c5f59;
 }
 
-.inline-form {
-  display: flex;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.grid {
+.form {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 0.5rem;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.form.inline {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  align-items: end;
 }
 
 input,
 select,
-textarea,
-button {
-  font: inherit;
-  padding: 0.45rem 0.55rem;
-}
-
-button {
-  cursor: pointer;
+textarea {
+  width: 100%;
+  border: 1px solid #bfd2e0;
+  border-radius: 8px;
+  padding: 8px;
 }
 
 table {
-  border-collapse: collapse;
   width: 100%;
+  border-collapse: collapse;
 }
 
 th,
 td {
-  border: 1px solid #dbe3ef;
-  padding: 0.45rem;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px;
   text-align: left;
 }
 
 .error {
   color: #b91c1c;
   font-weight: 600;
+}
+
+.inline-rating {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+@media (max-width: 900px) {
+  .header {
+    flex-direction: column;
+  }
+
+  .tabs {
+    overflow-x: auto;
+  }
 }

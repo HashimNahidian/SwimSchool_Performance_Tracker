@@ -1,116 +1,258 @@
-# Propel Swim Eval App
+# Propel Swim Academy Evaluation System
 
-Backend MVP for Propel Swim Academy's role-based instructor evaluation system.
+Production-oriented full-stack implementation of the Propel Swim Academy role-based evaluation platform.
 
 ## Stack
-- FastAPI
-- SQLAlchemy 2
-- Alembic
-- PostgreSQL (Docker compose in `infra/docker-compose.yml`)
 
-## Local Setup
-1. Start database:
+- Frontend: React + TypeScript + Vite
+- Backend: FastAPI + SQLAlchemy + Alembic
+- Database: PostgreSQL
+- Auth: Access + rotating refresh JWT tokens
+
+## Features Implemented
+
+- Role-based security for `MANAGER`, `SUPERVISOR`, `INSTRUCTOR`
+- Manager configuration APIs (users, levels, skills, attributes, templates)
+- Supervisor evaluation workflow (draft, update, submit)
+- Instructor evaluation access and filtering
+- Manager CSV export
+- Login rate limiting
+- Token refresh + logout revocation
+- Structured JSON API logs
+- Audit log table (`audit_logs`)
+- Health endpoints:
+  - `GET /health/live`
+  - `GET /health/ready`
+
+## Local Development
+
+1. Start Postgres:
+
 ```powershell
 docker compose -f infra/docker-compose.yml up -d
 ```
-2. Create venv and install backend dependencies:
+
+2. Backend:
+
 ```powershell
 cd backend
 python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-3. Configure env vars in `backend/.env`:
-```env
-DATABASE_URL=postgresql+psycopg2://propel:propelpass@localhost:5432/propel_eval
-SECRET_KEY=replace-with-a-random-secret
-SQL_ECHO=false
-ACCESS_TOKEN_EXPIRE_HOURS=8
-PASSWORD_HASH_ITERATIONS=390000
-ALLOWED_ORIGINS=http://localhost:5173
-LOGIN_RATE_LIMIT_MAX_ATTEMPTS=10
-LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
-```
-4. Run migrations:
-```powershell
-cd backend
+.\venv\Scripts\activate
+pip install -r requirements-dev.txt
+copy .env.example .env
 alembic upgrade head
-```
-5. Start API:
-```powershell
-cd backend
 uvicorn main:app --reload
 ```
-6. Start frontend:
+
+3. Bootstrap first manager (development only):
+
+```http
+POST http://127.0.0.1:8000/auth/bootstrap-manager
+Content-Type: application/json
+
+{
+  "name": "Admin",
+  "email": "admin@propel.local",
+  "password": "ChangeThis123!",
+  "role": "MANAGER",
+  "active": true
+}
+```
+
+4. Frontend:
+
 ```powershell
 cd frontend
 npm install
+copy .env.example .env
 npm run dev
 ```
-7. Seed demo data (optional but recommended):
-```powershell
-cd backend
-python seed.py
-```
-8. Run backend tests:
-```powershell
-cd backend
-pytest -q
-```
 
-## Containerized Run
-Run full stack (db + backend + frontend):
-```powershell
-docker compose -f infra/docker-compose.app.yml up --build
-```
+## Verified Runbook (Windows)
 
-Endpoints:
-- Frontend: `http://localhost:5173`
-- Backend API: `http://localhost:8000`
+From repository root:
 
-For DB-only local mode, keep using:
 ```powershell
 docker compose -f infra/docker-compose.yml up -d
 ```
 
-## Implemented Backend Scope
-- Role model: `MANAGER`, `SUPERVISOR`, `INSTRUCTOR`
-- Core tables: users, levels, skills, attributes, templates, template_attributes, evaluations, evaluation_ratings, audit_logs
-- Role-enforced endpoints for:
-  - Manager configuration CRUD (users/levels/skills/attributes/templates)
-  - Supervisor draft + submit evaluation flow
-  - Instructor evaluation list/detail
-  - Manager evaluation listing + CSV export
-- Token-based auth (`/auth/login`) with signed bearer token
+Backend terminal:
 
-## Important API Endpoints
-- `POST /auth/login`
-- `POST /users` (manager-only, includes `password`)
-- `GET /instructors` (manager + supervisor)
-- `POST /levels`, `PATCH /levels/{id}`, `GET /levels`
-- `POST /skills`, `PATCH /skills/{id}`, `GET /skills`
-- `POST /attributes`, `PATCH /attributes/{id}`, `GET /attributes`
-- `POST /templates`, `PATCH /templates/{id}`, `GET /templates`
-- `POST /evaluations/draft`
-- `PATCH /evaluations/{id}/draft`
-- `POST /evaluations/{id}/submit`
-- `GET /evaluations/{id}`
-- `GET /me/evaluations`
-- `GET /manager/evaluations`
-- `GET /supervisor/evaluations`
-- `GET /supervisors`
-- `GET /me/evaluations/trends`
-- `GET /exports/evaluations.csv`
+```powershell
+cd backend
+.\venv\Scripts\Activate.ps1
+copy .env.example .env
+alembic upgrade head
+uvicorn main:app --reload --port 8000
+```
 
-Evaluation listing/export query options:
-- Filters: `date_from`, `date_to`, `level_id`, `skill_id`, `supervisor_id`, `instructor_id`, `status`
-- Pagination: `limit`, `offset` (list endpoints)
-- Sorting: `sort_by` in (`id`, `created_at`, `session_date`, `submitted_at`, `status`) and `sort_dir` in (`asc`, `desc`)
+Frontend terminal:
 
-## Notes
-- Frontend now includes a functional MVP for manager/supervisor/instructor flows.
-- Manager UI supports activate/deactivate controls for levels, skills, attributes, and templates.
-- `POST /auth/login` requires `email` + `password`.
-- Seeded login emails: `manager@propel.local`, `supervisor@propel.local`, `instructor1@propel.local`, `instructor2@propel.local`
-- Seeded password for all users: `Propel123!`
-- CI workflow is configured at `.github/workflows/ci.yml` and runs backend tests + frontend build on push/PR.
+```powershell
+cd frontend
+npm run dev
+```
+
+Checks:
+- API live: `http://127.0.0.1:8000/health/live`
+- UI: `http://localhost:5173`
+
+If port 8000 is already used:
+
+```powershell
+Get-NetTCPConnection -LocalPort 8000 -State Listen | Select-Object OwningProcess
+Stop-Process -Id <PID> -Force
+```
+
+## Production Deploy (Docker Compose)
+
+1. Create environment file from template:
+
+```powershell
+cp infra/.env.prod.example infra/.env.prod
+```
+
+2. Set secure values in `infra/.env.prod`:
+- strong `SECRET_KEY`
+- production `CORS_ORIGINS`
+- production `VITE_API_BASE_URL`
+
+3. Deploy:
+
+```powershell
+docker compose -f infra/docker-compose.prod.yml up -d --build
+```
+
+4. Verify:
+- `GET /health/live`
+- `GET /health/ready`
+
+## Deployment Runbook (Single School)
+
+This is the minimal production-like runbook for one swim school.
+
+### Environment Variables
+
+| Variable | Required | Example | Notes |
+|---|---|---|---|
+| `POSTGRES_USER` | yes | `propel` | Postgres username used by DB and backend connection string. |
+| `POSTGRES_PASSWORD` | yes | long random string | Postgres password used by DB and backend connection string. |
+| `POSTGRES_DB` | yes | `propel_eval` | Postgres database name. |
+| `DATABASE_URL` | yes | `postgresql+psycopg2://propel:***@db:5432/propel_eval` | Backend DB connection string inside compose network. |
+| `SECRET_KEY` | yes | long random string | Never use default in production. |
+| `CORS_ORIGINS` | yes | `https://app.example.com` | Comma-separated list of allowed frontend origins. |
+| `ALLOW_BOOTSTRAP_MANAGER` | yes | `false` | Set `true` only for first-manager bootstrap window. |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | no | `30` | Defaults are acceptable. |
+| `REFRESH_TOKEN_EXPIRE_MINUTES` | no | `10080` | Defaults are acceptable. |
+| `LOGIN_RATE_LIMIT_COUNT` | no | `8` | Tighten as needed. |
+| `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | no | `60` | Tighten as needed. |
+| `ENABLE_AUDIT_LOG` | no | `true` | Keep enabled in production. |
+| `SMTP_HOST` | no | `smtp.example.com` | If unset, email export returns `501 Email not configured`. |
+| `SMTP_PORT` | no | `587` | Used only when SMTP is configured. |
+| `SMTP_USERNAME` | no | `mailer-user` | Optional for relays requiring auth. |
+| `SMTP_PASSWORD` | no | `mailer-pass` | Optional for relays requiring auth. |
+| `SMTP_FROM_EMAIL` | no | `noreply@example.com` | Required for real email sending. |
+| `SMTP_USE_TLS` | no | `true` | TLS toggle for SMTP. |
+| `VITE_API_BASE_URL` | yes (frontend build) | `https://api.example.com` | Frontend API origin at build time. |
+
+### One School Go-Live (Copy/Paste)
+
+```powershell
+cp infra/.env.prod.example infra/.env.prod
+# edit infra/.env.prod and set POSTGRES_*, DATABASE_URL, SECRET_KEY, CORS_ORIGINS, VITE_API_BASE_URL
+docker compose -f infra/docker-compose.prod.yml up -d --build
+docker compose -f infra/docker-compose.prod.yml exec -T backend alembic upgrade head
+```
+
+Temporarily enable bootstrap in `infra/.env.prod`:
+- set `ALLOW_BOOTSTRAP_MANAGER=true`
+- run `docker compose -f infra/docker-compose.prod.yml up -d backend`
+- call `POST /auth/bootstrap-manager`
+- set `ALLOW_BOOTSTRAP_MANAGER=false`
+- run `docker compose -f infra/docker-compose.prod.yml up -d backend`
+
+### Bootstrap (First School + First Manager)
+
+1. Run migrations (`alembic upgrade head`).
+2. Temporarily set `ALLOW_BOOTSTRAP_MANAGER=true`.
+3. Call:
+
+```http
+POST /auth/bootstrap-manager
+Content-Type: application/json
+
+{
+  "name": "School Manager",
+  "email": "manager@school.local",
+  "password": "ChangeMe123!",
+  "role": "MANAGER",
+  "active": true
+}
+```
+
+Behavior:
+- If no school exists, backend creates `Default School`.
+- It creates the first manager in that school.
+- Endpoint rejects additional manager bootstraps.
+
+4. Set `ALLOW_BOOTSTRAP_MANAGER=false` immediately after bootstrap.
+
+### Start Commands (Manual Production-like)
+
+Backend:
+
+```powershell
+cd backend
+copy .env.example .env
+alembic upgrade head
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+Frontend:
+
+```powershell
+cd frontend
+copy .env.example .env
+npm run build
+npm run preview -- --host 0.0.0.0 --port 4173
+```
+
+### Smoke Checklist
+
+1. `GET /health/live` and `GET /health/ready` return 200.
+2. Manager can log in.
+3. Manager can create level and skill.
+4. Manager can create template with criteria and ordered `sort_order`.
+5. Manager evaluation list works and CSV export works.
+6. Email export endpoint:
+   - returns `501` if SMTP is unset.
+   - returns `200` when SMTP is configured and reachable.
+
+## CI
+
+GitHub Actions workflow at `.github/workflows/ci.yml` runs:
+- backend dependency install
+- alembic migration check
+- backend tests
+- frontend build
+
+## Security Notes
+
+- In production set:
+  - `APP_ENV=production`
+  - `ALLOW_BOOTSTRAP_MANAGER=false`
+  - restricted `CORS_ORIGINS`
+  - non-default `SECRET_KEY`
+- Login endpoint includes basic rate limiting via IP+email key.
+
+## Operations
+
+See `docs/OPERATIONS.md` for:
+- backup and restore scripts
+- audit logging behavior
+- release checklist
+
+## Migrations
+
+- Base schema: `backend/alembic/versions/1b1c9d4f7a21_create_initial_schema.py`
+- Security/audit schema: `backend/alembic/versions/5e4c8a2d9f10_add_refresh_tokens_and_audit_logs.py`
