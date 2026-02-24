@@ -175,6 +175,30 @@ def seed_two_school_evals(db: Session) -> dict[str, int]:
         status=models.EvaluationStatus.SUBMITTED,
         submitted_at=datetime(2026, 2, 23, 11, 0, tzinfo=timezone.utc),
     )
+    eval_b_tie_submitted_at_a = models.Evaluation(
+        school_id=school_b.id,
+        instructor_id=instructor_b.id,
+        supervisor_id=supervisor_b.id,
+        level_id=level_b.id,
+        skill_id=skill_b.id,
+        session_label="School B Tie SubmittedAt A",
+        session_date=date(2026, 2, 22),
+        notes="B tie submitted_at A",
+        status=models.EvaluationStatus.SUBMITTED,
+        submitted_at=datetime(2026, 2, 23, 15, 0, tzinfo=timezone.utc),
+    )
+    eval_b_tie_submitted_at_b = models.Evaluation(
+        school_id=school_b.id,
+        instructor_id=instructor_b.id,
+        supervisor_id=supervisor_b.id,
+        level_id=level_b.id,
+        skill_id=skill_b.id,
+        session_label="School B Tie SubmittedAt B",
+        session_date=date(2026, 2, 24),
+        notes="B tie submitted_at B",
+        status=models.EvaluationStatus.SUBMITTED,
+        submitted_at=datetime(2026, 2, 23, 15, 0, tzinfo=timezone.utc),
+    )
     db.add_all(
         [
             eval_a,
@@ -183,6 +207,8 @@ def seed_two_school_evals(db: Session) -> dict[str, int]:
             eval_b_late_submitted,
             eval_b_same_date_a,
             eval_b_same_date_b,
+            eval_b_tie_submitted_at_a,
+            eval_b_tie_submitted_at_b,
         ]
     )
     db.flush()
@@ -212,6 +238,8 @@ def seed_two_school_evals(db: Session) -> dict[str, int]:
         "eval_b_same_date_a_id": eval_b_same_date_a.id,
         "eval_b_same_date_b_id": eval_b_same_date_b.id,
         "eval_b_late_submitted_id": eval_b_late_submitted.id,
+        "eval_b_tie_submitted_at_a_id": eval_b_tie_submitted_at_a.id,
+        "eval_b_tie_submitted_at_b_id": eval_b_tie_submitted_at_b.id,
     }
 
 
@@ -360,10 +388,12 @@ def test_filters_and_sort_compose_deterministically_for_school_b(db_session: Ses
     assert all(date(2026, 2, 21) <= row.session_date <= date(2026, 2, 26) for row in all_rows)
 
     expected_ids = [
+        seeded["eval_b_tie_submitted_at_a_id"],
         eval_b_tie.id,
         seeded["eval_b_same_date_b_id"],
         seeded["eval_b_same_date_a_id"],
         seeded["eval_b_id"],
+        seeded["eval_b_tie_submitted_at_b_id"],
         seeded["eval_b_late_submitted_id"],
     ]
     assert [row.id for row in all_rows] == expected_ids
@@ -441,10 +471,12 @@ def test_limit_offset_are_applied_after_filters_and_sorting(db_session: Session)
     stmt = apply_evaluation_sorting(stmt, sort_by="session_date", sort_dir="asc")
 
     expected_ids = [
+        seeded["eval_b_tie_submitted_at_a_id"],
         eval_b_tie.id,
         seeded["eval_b_same_date_b_id"],
         seeded["eval_b_same_date_a_id"],
         seeded["eval_b_id"],
+        seeded["eval_b_tie_submitted_at_b_id"],
         seeded["eval_b_late_submitted_id"],
     ]
     all_rows = db_session.scalars(stmt).all()
@@ -465,8 +497,13 @@ def test_sort_by_session_date_asc_then_id_desc_tiebreak_is_deterministic(db_sess
     rows = db_session.scalars(stmt).all()
 
     row_ids = [row.id for row in rows]
+    rows_by_id = {row.id: row for row in rows}
     row_dates = [row.session_date for row in rows]
     assert row_dates == sorted(row_dates)
+    assert (
+        rows_by_id[seeded["eval_b_same_date_b_id"]].session_date
+        == rows_by_id[seeded["eval_b_same_date_a_id"]].session_date
+    )
     assert row_ids.index(seeded["eval_b_same_date_b_id"]) < row_ids.index(seeded["eval_b_same_date_a_id"])
     assert row_ids.index(seeded["eval_b_same_date_a_id"]) < row_ids.index(seeded["eval_b_id"])
 
@@ -481,9 +518,15 @@ def test_sort_by_submitted_at_asc_then_id_desc_tiebreak_is_deterministic(db_sess
     rows = db_session.scalars(stmt).all()
 
     row_ids = [row.id for row in rows]
+    rows_by_id = {row.id: row for row in rows}
     submitted_times = [row.submitted_at for row in rows]
     assert submitted_times == sorted(submitted_times)
-    assert row_ids.index(seeded["eval_b_same_date_a_id"]) < row_ids.index(seeded["eval_b_id"])
+    tie_a_id = seeded["eval_b_tie_submitted_at_a_id"]
+    tie_b_id = seeded["eval_b_tie_submitted_at_b_id"]
+    assert rows_by_id[tie_a_id].submitted_at == rows_by_id[tie_b_id].submitted_at
+    higher_id = tie_a_id if tie_a_id > tie_b_id else tie_b_id
+    lower_id = tie_b_id if tie_a_id > tie_b_id else tie_a_id
+    assert row_ids.index(higher_id) < row_ids.index(lower_id)
 
 
 def test_sorting_invalid_inputs_still_raise_400(db_session: Session):
