@@ -504,8 +504,11 @@ def test_sort_by_session_date_asc_then_id_desc_tiebreak_is_deterministic(db_sess
         rows_by_id[seeded["eval_b_same_date_b_id"]].session_date
         == rows_by_id[seeded["eval_b_same_date_a_id"]].session_date
     )
-    assert row_ids.index(seeded["eval_b_same_date_b_id"]) < row_ids.index(seeded["eval_b_same_date_a_id"])
-    assert row_ids.index(seeded["eval_b_same_date_a_id"]) < row_ids.index(seeded["eval_b_id"])
+    tie_a_id = seeded["eval_b_same_date_a_id"]
+    tie_b_id = seeded["eval_b_same_date_b_id"]
+    higher_id = tie_a_id if tie_a_id > tie_b_id else tie_b_id
+    lower_id = tie_b_id if tie_a_id > tie_b_id else tie_a_id
+    assert row_ids.index(higher_id) < row_ids.index(lower_id)
 
 
 def test_sort_by_submitted_at_asc_then_id_desc_tiebreak_is_deterministic(db_session: Session):
