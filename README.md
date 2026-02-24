@@ -127,6 +127,89 @@ docker compose --env-file infra/.env.prod -f infra/docker-compose.prod.yml up -d
 - `GET /health/live`
 - `GET /health/ready`
 
+## Deployment Runbook (Single School)
+
+This is the minimal production-like runbook for one swim school.
+
+### Environment Variables
+
+| Variable | Required | Example | Notes |
+|---|---|---|---|
+| `APP_ENV` | yes | `production` | Use `production` outside local dev. |
+| `DATABASE_URL` | yes | `postgresql+psycopg2://propel:***@db:5432/propel_eval` | Backend DB connection string. |
+| `SECRET_KEY` | yes | long random string | Never use default in production. |
+| `CORS_ORIGINS` | yes | `https://app.example.com` | Comma-separated list of allowed frontend origins. |
+| `ALLOW_BOOTSTRAP_MANAGER` | yes | `false` | Set `true` only for first-manager bootstrap window. |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | no | `30` | Defaults are acceptable. |
+| `REFRESH_TOKEN_EXPIRE_MINUTES` | no | `10080` | Defaults are acceptable. |
+| `LOGIN_RATE_LIMIT_COUNT` | no | `8` | Tighten as needed. |
+| `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | no | `60` | Tighten as needed. |
+| `ENABLE_AUDIT_LOG` | no | `true` | Keep enabled in production. |
+| `SMTP_HOST` | no | `smtp.example.com` | If unset, email export returns `501 Email not configured`. |
+| `SMTP_PORT` | no | `587` | Used only when SMTP is configured. |
+| `SMTP_USERNAME` | no | `mailer-user` | Optional for relays requiring auth. |
+| `SMTP_PASSWORD` | no | `mailer-pass` | Optional for relays requiring auth. |
+| `SMTP_FROM_EMAIL` | no | `noreply@example.com` | Required for real email sending. |
+| `SMTP_USE_TLS` | no | `true` | TLS toggle for SMTP. |
+| `VITE_API_BASE_URL` | yes (frontend build) | `https://api.example.com` | Frontend API origin at build time. |
+
+### Bootstrap (First School + First Manager)
+
+1. Run migrations (`alembic upgrade head`).
+2. Temporarily set `ALLOW_BOOTSTRAP_MANAGER=true`.
+3. Call:
+
+```http
+POST /auth/bootstrap-manager
+Content-Type: application/json
+
+{
+  "name": "School Manager",
+  "email": "manager@school.local",
+  "password": "ChangeMe123!",
+  "role": "MANAGER",
+  "active": true
+}
+```
+
+Behavior:
+- If no school exists, backend creates `Default School`.
+- It creates the first manager in that school.
+- Endpoint rejects additional manager bootstraps.
+
+4. Set `ALLOW_BOOTSTRAP_MANAGER=false` immediately after bootstrap.
+
+### Start Commands (Manual Production-like)
+
+Backend:
+
+```powershell
+cd backend
+copy .env.example .env
+alembic upgrade head
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+Frontend:
+
+```powershell
+cd frontend
+copy .env.example .env
+npm run build
+npm run preview -- --host 0.0.0.0 --port 4173
+```
+
+### Smoke Checklist
+
+1. `GET /health/live` and `GET /health/ready` return 200.
+2. Manager can log in.
+3. Manager can create level and skill.
+4. Manager can create template with criteria and ordered `sort_order`.
+5. Manager evaluation list works and CSV export works.
+6. Email export endpoint:
+   - returns `501` if SMTP is unset.
+   - returns `200` when SMTP is configured and reachable.
+
 ## CI
 
 GitHub Actions workflow at `.github/workflows/ci.yml` runs:
