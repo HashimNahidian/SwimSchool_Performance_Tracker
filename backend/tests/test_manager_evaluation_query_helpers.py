@@ -151,7 +151,40 @@ def seed_two_school_evals(db: Session) -> dict[str, int]:
         status=models.EvaluationStatus.SUBMITTED,
         submitted_at=datetime(2026, 2, 25, 12, 0, tzinfo=timezone.utc),
     )
-    db.add_all([eval_a, eval_b, eval_b_early_draft, eval_b_late_submitted])
+    eval_b_same_date_a = models.Evaluation(
+        school_id=school_b.id,
+        instructor_id=instructor_b.id,
+        supervisor_id=supervisor_b.id,
+        level_id=level_b.id,
+        skill_id=skill_b.id,
+        session_label="School B Same Date A",
+        session_date=date(2026, 2, 23),
+        notes="B same A",
+        status=models.EvaluationStatus.SUBMITTED,
+        submitted_at=datetime(2026, 2, 23, 10, 0, tzinfo=timezone.utc),
+    )
+    eval_b_same_date_b = models.Evaluation(
+        school_id=school_b.id,
+        instructor_id=instructor_b.id,
+        supervisor_id=supervisor_b.id,
+        level_id=level_b.id,
+        skill_id=skill_b.id,
+        session_label="School B Same Date B",
+        session_date=date(2026, 2, 23),
+        notes="B same B",
+        status=models.EvaluationStatus.SUBMITTED,
+        submitted_at=datetime(2026, 2, 23, 11, 0, tzinfo=timezone.utc),
+    )
+    db.add_all(
+        [
+            eval_a,
+            eval_b,
+            eval_b_early_draft,
+            eval_b_late_submitted,
+            eval_b_same_date_a,
+            eval_b_same_date_b,
+        ]
+    )
     db.flush()
 
     attribute = models.Attribute(name="Rating Attribute", description="for rating filter tests", active=True)
@@ -176,6 +209,8 @@ def seed_two_school_evals(db: Session) -> dict[str, int]:
         "skill_b_id": skill_b.id,
         "eval_a_id": eval_a.id,
         "eval_b_id": eval_b.id,
+        "eval_b_same_date_a_id": eval_b_same_date_a.id,
+        "eval_b_same_date_b_id": eval_b_same_date_b.id,
         "eval_b_late_submitted_id": eval_b_late_submitted.id,
     }
 
@@ -324,7 +359,13 @@ def test_filters_and_sort_compose_deterministically_for_school_b(db_session: Ses
     assert all(row.status == models.EvaluationStatus.SUBMITTED for row in all_rows)
     assert all(date(2026, 2, 21) <= row.session_date <= date(2026, 2, 26) for row in all_rows)
 
-    expected_ids = [eval_b_tie.id, seeded["eval_b_id"], seeded["eval_b_late_submitted_id"]]
+    expected_ids = [
+        eval_b_tie.id,
+        seeded["eval_b_same_date_b_id"],
+        seeded["eval_b_same_date_a_id"],
+        seeded["eval_b_id"],
+        seeded["eval_b_late_submitted_id"],
+    ]
     assert [row.id for row in all_rows] == expected_ids
 
     page1 = db_session.scalars(sorted_stmt.limit(1).offset(0)).all()
@@ -399,10 +440,62 @@ def test_limit_offset_are_applied_after_filters_and_sorting(db_session: Session)
     stmt = apply_evaluation_filters(stmt, status_filter=models.EvaluationStatus.SUBMITTED)
     stmt = apply_evaluation_sorting(stmt, sort_by="session_date", sort_dir="asc")
 
-    expected_ids = [eval_b_tie.id, seeded["eval_b_id"], seeded["eval_b_late_submitted_id"]]
+    expected_ids = [
+        eval_b_tie.id,
+        seeded["eval_b_same_date_b_id"],
+        seeded["eval_b_same_date_a_id"],
+        seeded["eval_b_id"],
+        seeded["eval_b_late_submitted_id"],
+    ]
     all_rows = db_session.scalars(stmt).all()
     assert [row.id for row in all_rows] == expected_ids
 
     page_1 = db_session.scalars(stmt.limit(1).offset(0)).all()
     page_2 = db_session.scalars(stmt.limit(1).offset(1)).all()
     assert [page_1[0].id, page_2[0].id] == expected_ids[:2]
+
+
+def test_sort_by_session_date_asc_then_id_desc_tiebreak_is_deterministic(db_session: Session):
+    seeded = seed_two_school_evals(db_session)
+    school_b_id = seeded["school_b_id"]
+
+    stmt = evaluation_query_with_joins(school_b_id).order_by(None)
+    stmt = apply_evaluation_filters(stmt, status_filter=models.EvaluationStatus.SUBMITTED)
+    stmt = apply_evaluation_sorting(stmt, sort_by="session_date", sort_dir="asc")
+    rows = db_session.scalars(stmt).all()
+
+    row_ids = [row.id for row in rows]
+    row_dates = [row.session_date for row in rows]
+    assert row_dates == sorted(row_dates)
+    assert row_ids.index(seeded["eval_b_same_date_b_id"]) < row_ids.index(seeded["eval_b_same_date_a_id"])
+    assert row_ids.index(seeded["eval_b_same_date_a_id"]) < row_ids.index(seeded["eval_b_id"])
+
+
+def test_sort_by_submitted_at_asc_then_id_desc_tiebreak_is_deterministic(db_session: Session):
+    seeded = seed_two_school_evals(db_session)
+    school_b_id = seeded["school_b_id"]
+
+    stmt = evaluation_query_with_joins(school_b_id).order_by(None)
+    stmt = apply_evaluation_filters(stmt, status_filter=models.EvaluationStatus.SUBMITTED)
+    stmt = apply_evaluation_sorting(stmt, sort_by="submitted_at", sort_dir="asc")
+    rows = db_session.scalars(stmt).all()
+
+    row_ids = [row.id for row in rows]
+    submitted_times = [row.submitted_at for row in rows]
+    assert submitted_times == sorted(submitted_times)
+    assert row_ids.index(seeded["eval_b_same_date_a_id"]) < row_ids.index(seeded["eval_b_id"])
+
+
+def test_sorting_invalid_inputs_still_raise_400(db_session: Session):
+    seeded = seed_two_school_evals(db_session)
+    stmt = evaluation_query_with_joins(seeded["school_b_id"]).order_by(None)
+
+    with pytest.raises(HTTPException) as invalid_sort_by:
+        apply_evaluation_sorting(stmt, sort_by="nope", sort_dir="asc")
+    assert invalid_sort_by.value.status_code == 400
+    assert invalid_sort_by.value.detail == "Invalid sort_by"
+
+    with pytest.raises(HTTPException) as invalid_sort_dir:
+        apply_evaluation_sorting(stmt, sort_by="session_date", sort_dir="sideways")
+    assert invalid_sort_dir.value.status_code == 400
+    assert invalid_sort_dir.value.detail == "Invalid sort_dir"
