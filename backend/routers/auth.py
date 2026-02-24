@@ -26,6 +26,12 @@ login_limiter = FixedWindowRateLimiter(
 )
 
 
+def _as_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 @router.post("/bootstrap-manager", response_model=UserOut)
 def bootstrap_manager(payload: UserCreate, db: Session = Depends(get_db)) -> User:
     if settings.app_env == "production" and not settings.allow_bootstrap_manager:
@@ -101,7 +107,7 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenResp
         raise HTTPException(status_code=401, detail="Unknown refresh token")
     if token_record.revoked_at is not None:
         raise HTTPException(status_code=401, detail="Refresh token revoked")
-    if token_record.expires_at <= datetime.now(timezone.utc):
+    if _as_utc(token_record.expires_at) <= datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="Refresh token expired")
 
     user = db.get(User, user_id)
