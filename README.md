@@ -109,7 +109,7 @@ Stop-Process -Id <PID> -Force
 1. Create environment file from template:
 
 ```powershell
-copy infra\.env.prod.example infra\.env.prod
+cp infra/.env.prod.example infra/.env.prod
 ```
 
 2. Set secure values in `infra/.env.prod`:
@@ -120,7 +120,7 @@ copy infra\.env.prod.example infra\.env.prod
 3. Deploy:
 
 ```powershell
-docker compose --env-file infra/.env.prod -f infra/docker-compose.prod.yml up -d --build
+docker compose -f infra/docker-compose.prod.yml up -d --build
 ```
 
 4. Verify:
@@ -135,8 +135,10 @@ This is the minimal production-like runbook for one swim school.
 
 | Variable | Required | Example | Notes |
 |---|---|---|---|
-| `APP_ENV` | yes | `production` | Use `production` outside local dev. |
-| `DATABASE_URL` | yes | `postgresql+psycopg2://propel:***@db:5432/propel_eval` | Backend DB connection string. |
+| `POSTGRES_USER` | yes | `propel` | Postgres username used by DB and backend connection string. |
+| `POSTGRES_PASSWORD` | yes | long random string | Postgres password used by DB and backend connection string. |
+| `POSTGRES_DB` | yes | `propel_eval` | Postgres database name. |
+| `DATABASE_URL` | yes | `postgresql+psycopg2://propel:***@db:5432/propel_eval` | Backend DB connection string inside compose network. |
 | `SECRET_KEY` | yes | long random string | Never use default in production. |
 | `CORS_ORIGINS` | yes | `https://app.example.com` | Comma-separated list of allowed frontend origins. |
 | `ALLOW_BOOTSTRAP_MANAGER` | yes | `false` | Set `true` only for first-manager bootstrap window. |
@@ -152,6 +154,22 @@ This is the minimal production-like runbook for one swim school.
 | `SMTP_FROM_EMAIL` | no | `noreply@example.com` | Required for real email sending. |
 | `SMTP_USE_TLS` | no | `true` | TLS toggle for SMTP. |
 | `VITE_API_BASE_URL` | yes (frontend build) | `https://api.example.com` | Frontend API origin at build time. |
+
+### One School Go-Live (Copy/Paste)
+
+```powershell
+cp infra/.env.prod.example infra/.env.prod
+# edit infra/.env.prod and set POSTGRES_*, DATABASE_URL, SECRET_KEY, CORS_ORIGINS, VITE_API_BASE_URL
+docker compose -f infra/docker-compose.prod.yml up -d --build
+docker compose -f infra/docker-compose.prod.yml exec -T backend alembic upgrade head
+```
+
+Temporarily enable bootstrap in `infra/.env.prod`:
+- set `ALLOW_BOOTSTRAP_MANAGER=true`
+- run `docker compose -f infra/docker-compose.prod.yml up -d backend`
+- call `POST /auth/bootstrap-manager`
+- set `ALLOW_BOOTSTRAP_MANAGER=false`
+- run `docker compose -f infra/docker-compose.prod.yml up -d backend`
 
 ### Bootstrap (First School + First Manager)
 
