@@ -155,12 +155,15 @@ def seed_two_school_evals(db: Session) -> dict[str, int]:
     db.flush()
 
     attribute = models.Attribute(name="Rating Attribute", description="for rating filter tests", active=True)
-    db.add(attribute)
+    attribute_2 = models.Attribute(name="Rating Attribute 2", description="for multi-rating tests", active=True)
+    db.add_all([attribute, attribute_2])
     db.flush()
 
     rating_a = models.EvaluationRating(evaluation_id=eval_a.id, attribute_id=attribute.id, rating_value=3)
+    rating_a_2 = models.EvaluationRating(evaluation_id=eval_a.id, attribute_id=attribute_2.id, rating_value=2)
     rating_b = models.EvaluationRating(evaluation_id=eval_b.id, attribute_id=attribute.id, rating_value=1)
-    db.add_all([rating_a, rating_b])
+    rating_b_2 = models.EvaluationRating(evaluation_id=eval_b.id, attribute_id=attribute_2.id, rating_value=2)
+    db.add_all([rating_a, rating_a_2, rating_b, rating_b_2])
     db.commit()
 
     return {
@@ -347,3 +350,59 @@ def test_date_filter_inclusive_bounds(db_session: Session):
     assert len(rows) == 1
     assert rows[0].session_date == boundary_day
     assert rows[0].id == seeded["eval_b_late_submitted_id"]
+
+
+def test_rating_filter_matches_any_rating_for_eval_with_multiple_ratings(db_session: Session):
+    seeded = seed_two_school_evals(db_session)
+
+    stmt = evaluation_query_with_joins(seeded["school_b_id"])
+    stmt = apply_evaluation_filters(stmt, rating_value=2)
+    rows = db_session.scalars(stmt).all()
+
+    assert len(rows) == 1
+    assert rows[0].id == seeded["eval_b_id"]
+    assert rows[0].session_label == "School B Session"
+    assert all(row.school_id == seeded["school_b_id"] for row in rows)
+    assert all("School A Session" != row.session_label for row in rows)
+
+
+def test_rating_filter_cross_tenant_still_returns_no_rows_with_multiple_ratings(db_session: Session):
+    seeded = seed_two_school_evals(db_session)
+
+    stmt = evaluation_query_with_joins(seeded["school_b_id"])
+    stmt = apply_evaluation_filters(stmt, rating_value=3)
+    rows = db_session.scalars(stmt).all()
+
+    assert len(rows) == 0
+
+
+def test_limit_offset_are_applied_after_filters_and_sorting(db_session: Session):
+    seeded = seed_two_school_evals(db_session)
+    school_b_id = seeded["school_b_id"]
+
+    eval_b_tie = models.Evaluation(
+        school_id=school_b_id,
+        instructor_id=seeded["instructor_b_id"],
+        supervisor_id=seeded["supervisor_b_id"],
+        level_id=seeded["level_b_id"],
+        skill_id=seeded["skill_b_id"],
+        session_label="School B Session Tie 2",
+        session_date=date(2026, 2, 23),
+        notes="B tie 2 notes",
+        status=models.EvaluationStatus.SUBMITTED,
+        submitted_at=datetime(2026, 2, 23, 14, 0, tzinfo=timezone.utc),
+    )
+    db_session.add(eval_b_tie)
+    db_session.commit()
+
+    stmt = evaluation_query_with_joins(school_b_id).order_by(None)
+    stmt = apply_evaluation_filters(stmt, status_filter=models.EvaluationStatus.SUBMITTED)
+    stmt = apply_evaluation_sorting(stmt, sort_by="session_date", sort_dir="asc")
+
+    expected_ids = [eval_b_tie.id, seeded["eval_b_id"], seeded["eval_b_late_submitted_id"]]
+    all_rows = db_session.scalars(stmt).all()
+    assert [row.id for row in all_rows] == expected_ids
+
+    page_1 = db_session.scalars(stmt.limit(1).offset(0)).all()
+    page_2 = db_session.scalars(stmt.limit(1).offset(1)).all()
+    assert [page_1[0].id, page_2[0].id] == expected_ids[:2]
