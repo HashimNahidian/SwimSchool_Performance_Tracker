@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useState } from "react";
-import { apiRequest } from "./api";
-import type { LoginResponse, User } from "./types";
+import { login as apiLogin, me as apiMe } from "./api";
+import type { User } from "./types";
 
 interface AuthContextValue {
   user: User | null;
@@ -33,14 +33,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       token,
       login: async (email: string, password: string) => {
-        const data = await apiRequest<LoginResponse>("/auth/login", {
-          method: "POST",
-          body: JSON.stringify({ email, password })
-        });
+        const data = await apiLogin(email, password);
+        const userData = await apiMe(data.access_token);
         setToken(data.access_token);
-        setUser(data.user);
+        setUser(userData);
         localStorage.setItem(TOKEN_KEY, data.access_token);
-        localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+        localStorage.setItem(USER_KEY, JSON.stringify(userData));
       },
       logout: () => {
         setToken(null);

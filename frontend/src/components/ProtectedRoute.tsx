@@ -1,6 +1,6 @@
 import { Navigate } from "react-router-dom";
-import { useAuth } from "./auth";
-import type { UserRole } from "./types";
+import { useAuth } from "../auth";
+import type { UserRole } from "../types";
 
 export function ProtectedRoute({
   children,
