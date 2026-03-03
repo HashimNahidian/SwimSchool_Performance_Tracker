@@ -20,6 +20,8 @@ import type { Attribute, EvaluationSummary, Level, Skill, TemplateConfig, User, 
 import { Section } from "../components/Section";
 import { EvaluationTable } from "../components/EvaluationTable";
 import { DonutChart } from "../components/DonutChart";
+import { BarChart } from "../components/BarChart";
+import { DEMO_EVALUATIONS, DEMO_LEVELS, DEMO_SKILLS, DEMO_USERS } from "../mockData";
 
 type ManagerTab = "dashboard" | "users" | "levels" | "skills" | "templates" | "evaluations";
 
@@ -70,6 +72,7 @@ export function ManagerPage() {
   const [attributes, setAttributes] = useState<Attribute[]>([]);
   const [templates, setTemplates] = useState<TemplateConfig[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
+  const [isDemo, setIsDemo] = useState(false);
   const [filters, setFilters] = useState({
     instructor_id: "", supervisor_id: "", level_id: "", skill_id: "",
     rating_value: "", date_from: "", date_to: "", status: "",
@@ -87,10 +90,26 @@ export function ManagerPage() {
       listManagerEvaluationsWithQuery(token, appliedQuery)
     ])
       .then(([u, l, s, a, t, e]) => {
-        setUsers(u); setLevels(l); setSkills(s);
-        setAttributes(a); setTemplates(t); setEvaluations(e);
+        setUsers(u.length > 0 ? u : DEMO_USERS);
+        setLevels(l.length > 0 ? l : DEMO_LEVELS);
+        setSkills(s.length > 0 ? s : DEMO_SKILLS);
+        setAttributes(a);
+        setTemplates(t);
+        if (e.length === 0) {
+          setEvaluations(DEMO_EVALUATIONS);
+          setIsDemo(true);
+        } else {
+          setEvaluations(e);
+        }
       })
-      .catch((e: Error) => setError(e.message));
+      .catch((e: Error) => {
+        setError(e.message);
+        setUsers(DEMO_USERS);
+        setLevels(DEMO_LEVELS);
+        setSkills(DEMO_SKILLS);
+        setEvaluations(DEMO_EVALUATIONS);
+        setIsDemo(true);
+      });
   }, [token, appliedQuery]);
 
   function downloadCsv() {
@@ -116,10 +135,23 @@ export function ManagerPage() {
   return (
     <>
       {error && <p className="error">{error}</p>}
+
+      {isDemo && (
+        <div className="demo-banner">
+          <span>🏊</span>
+          <span>Demo mode — showing sample data. Connect to the API to see live evaluations.</span>
+        </div>
+      )}
+
       <nav className="tabs">
         {MANAGER_TABS.map((item) => (
           <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
-            {item}
+            {item === "dashboard" ? "🏊 Dashboard" :
+             item === "users" ? "👤 Users" :
+             item === "levels" ? "🌊 Levels" :
+             item === "skills" ? "🏅 Skills" :
+             item === "templates" ? "📋 Templates" :
+             "📊 Evaluations"}
           </button>
         ))}
       </nav>
@@ -170,12 +202,15 @@ export function ManagerPage() {
             <select value={filters.rating_value}
               onChange={(e) => setFilters((p) => ({ ...p, rating_value: e.target.value, offset: "0" }))}>
               <option value="">all ratings</option>
-              <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+              <option value="1">1 — Remediate</option>
+              <option value="2">2 — Meets</option>
+              <option value="3">3 — Exceeds</option>
             </select>
             <select value={filters.status}
               onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value, offset: "0" }))}>
               <option value="">all statuses</option>
-              <option value="DRAFT">DRAFT</option><option value="SUBMITTED">SUBMITTED</option>
+              <option value="DRAFT">Draft</option>
+              <option value="SUBMITTED">Submitted</option>
             </select>
             <input type="date" value={filters.date_from}
               onChange={(e) => setFilters((p) => ({ ...p, date_from: e.target.value, offset: "0" }))} />
@@ -183,17 +218,16 @@ export function ManagerPage() {
               onChange={(e) => setFilters((p) => ({ ...p, date_to: e.target.value, offset: "0" }))} />
             <select value={filters.sort_by}
               onChange={(e) => setFilters((p) => ({ ...p, sort_by: e.target.value, offset: "0" }))}>
-              <option value="submitted_at">submitted_at</option>
-              <option value="session_date">session_date</option>
+              <option value="submitted_at">submitted at</option>
+              <option value="session_date">session date</option>
               <option value="id">id</option>
-              <option value="instructor_id">instructor_id</option>
-              <option value="supervisor_id">supervisor_id</option>
-              <option value="level_id">level_id</option>
-              <option value="skill_id">skill_id</option>
+              <option value="instructor_id">instructor</option>
+              <option value="supervisor_id">supervisor</option>
             </select>
             <select value={filters.sort_dir}
               onChange={(e) => setFilters((p) => ({ ...p, sort_dir: e.target.value, offset: "0" }))}>
-              <option value="desc">desc</option><option value="asc">asc</option>
+              <option value="desc">newest first</option>
+              <option value="asc">oldest first</option>
             </select>
             <input placeholder="limit" value={filters.limit}
               onChange={(e) => setFilters((p) => ({ ...p, limit: e.target.value }))} />
@@ -227,30 +261,42 @@ function ManagerUsers({ token, users, onCreated }: { token: string; users: User[
     setName(""); setEmail(""); setPassword("");
   }
 
+  const instructors = users.filter((u) => u.role === "INSTRUCTOR");
+  const supervisors = users.filter((u) => u.role === "SUPERVISOR");
+  const managers = users.filter((u) => u.role === "MANAGER");
+
   return (
     <Section title="Users">
       <form className="form inline" onSubmit={onSubmit}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="name" required />
-        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email" type="email" required />
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" required />
+        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" type="email" required />
         <input value={password} onChange={(e) => setPassword(e.target.value)}
-          placeholder="password (8+ chars)" minLength={8} type="password" required />
+          placeholder="Password (8+ chars)" minLength={8} type="password" required />
         <select value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
-          <option value="MANAGER">MANAGER</option>
-          <option value="SUPERVISOR">SUPERVISOR</option>
-          <option value="INSTRUCTOR">INSTRUCTOR</option>
+          <option value="MANAGER">Manager</option>
+          <option value="SUPERVISOR">Supervisor</option>
+          <option value="INSTRUCTOR">Instructor</option>
         </select>
-        <button type="submit">Add user</button>
+        <button type="submit">Add User</button>
       </form>
-      <table>
-        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active</th></tr></thead>
-        <tbody>
-          {users.map((u) => (
-            <tr key={u.id}>
-              <td>{u.name}</td><td>{u.email}</td><td>{u.role}</td><td>{u.active ? "yes" : "no"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+
+      {[{ label: "Instructors", list: instructors }, { label: "Supervisors", list: supervisors }, { label: "Managers", list: managers }].map(({ label, list }) => (
+        list.length > 0 && (
+          <div key={label} style={{ marginBottom: 20 }}>
+            <p className="chart-section-title">{label} ({list.length})</p>
+            <table>
+              <thead><tr><th>Name</th><th>Email</th><th>Active</th></tr></thead>
+              <tbody>
+                {list.map((u) => (
+                  <tr key={u.id}>
+                    <td>{u.name}</td><td>{u.email}</td><td>{u.active ? "Yes" : "No"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      ))}
     </Section>
   );
 }
@@ -265,14 +311,22 @@ function ManagerLevels({ token, levels, onCreated }: { token: string; levels: Le
   }
 
   return (
-    <Section title="Levels">
+    <Section title="Swim Levels">
       <form className="form inline" onSubmit={onSubmit}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="level name" required />
-        <button type="submit">Add level</button>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Level 1 — Beginner" required />
+        <button type="submit">Add Level</button>
       </form>
-      <ul style={{ paddingLeft: 20 }}>
-        {levels.map((l) => <li key={l.id}>{l.name} ({l.active ? "active" : "inactive"})</li>)}
-      </ul>
+      <table>
+        <thead><tr><th>Level Name</th><th>Status</th></tr></thead>
+        <tbody>
+          {levels.map((l) => (
+            <tr key={l.id}>
+              <td>{l.name}</td>
+              <td><span className={l.active ? "badge-submitted" : "badge-draft"}>{l.active ? "Active" : "Inactive"}</span></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </Section>
   );
 }
@@ -295,20 +349,27 @@ function ManagerSkills({
   }
 
   return (
-    <Section title="Skills">
+    <Section title="Strokes & Skills">
       <form className="form inline" onSubmit={onSubmit}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="skill name" required />
-        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" />
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Freestyle" required />
+        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Description" />
         <select value={levelId} onChange={(e) => setLevelId(Number(e.target.value))}>
           {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
         </select>
-        <button type="submit">Add skill</button>
+        <button type="submit">Add Skill</button>
       </form>
-      <ul style={{ paddingLeft: 20 }}>
-        {skills.map((s) => (
-          <li key={s.id}>{s.name} (level {s.level_id}){s.description ? ` — ${s.description}` : ""}</li>
-        ))}
-      </ul>
+      <table>
+        <thead><tr><th>Skill</th><th>Level</th><th>Description</th></tr></thead>
+        <tbody>
+          {skills.map((s) => (
+            <tr key={s.id}>
+              <td>{s.name}</td>
+              <td>{levels.find((l) => l.id === s.level_id)?.name ?? s.level_id}</td>
+              <td style={{ color: "#64748b" }}>{s.description ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </Section>
   );
 }
@@ -355,10 +416,10 @@ function ManagerTemplates({
   }
 
   return (
-    <Section title="Templates">
+    <Section title="Evaluation Templates">
       <form className="form" onSubmit={onSubmit}>
         <div className="form inline">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="template name" required />
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Template name" required />
           <select value={levelId} onChange={(e) => setLevelId(Number(e.target.value))}>
             {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
@@ -391,10 +452,10 @@ function ManagerTemplates({
           {templates.map((t) => (
             <tr key={t.id}>
               <td>{t.name}</td>
-              <td>{levelMap.get(t.level_id) ?? "-"}</td>
-              <td>{skillMap.get(t.skill_id) ?? "-"}</td>
+              <td>{levelMap.get(t.level_id ?? 0) ?? "—"}</td>
+              <td>{skillMap.get(t.skill_id ?? 0) ?? "—"}</td>
               <td>{t.attributes.length}</td>
-              <td>{t.active ? "yes" : "no"}</td>
+              <td><span className={t.active ? "badge-submitted" : "badge-draft"}>{t.active ? "Active" : "Inactive"}</span></td>
               <td>
                 <button onClick={async () => { const u = await updateTemplate(token, t.id, { active: !t.active }); onUpdated(u); }}>
                   {t.active ? "Deactivate" : "Activate"}
@@ -417,6 +478,10 @@ function StatCard({ label, value, color }: { label: string; value: number; color
   );
 }
 
+function monthLabel(dateStr: string) {
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+}
+
 function ManagerDashboard({
   rows, onGo, onConfigureTemplates, onExportCsv, onEmailCsv, appliedManagerQuery
 }: {
@@ -437,9 +502,47 @@ function ManagerDashboard({
     return { total: rows.length, draft, submitted, recent7d, recent: rows.slice(0, 8) };
   }, [rows]);
 
+  // Instructor performance chart
+  const instructorData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of rows) {
+      counts[r.instructor_name] = (counts[r.instructor_name] ?? 0) + 1;
+    }
+    return Object.entries(counts)
+      .sort(([, a], [, b]) => b - a)
+      .map(([label, value]) => ({ label, value, color: "#0077b6" }));
+  }, [rows]);
+
+  // Skill distribution
+  const skillData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of rows) {
+      counts[r.skill_name] = (counts[r.skill_name] ?? 0) + 1;
+    }
+    return Object.entries(counts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 8)
+      .map(([label, value]) => ({ label, value, color: "#0096c7" }));
+  }, [rows]);
+
+  // Monthly trend
+  const monthlyData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of rows) {
+      if (r.session_date) {
+        const key = r.session_date.slice(0, 7);
+        counts[key] = (counts[key] ?? 0) + 1;
+      }
+    }
+    return Object.entries(counts)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-6)
+      .map(([month, value]) => ({ label: monthLabel(month + "-01"), value, color: "#0f9b8e" }));
+  }, [rows]);
+
   const [showEmail, setShowEmail] = useState(false);
   const [toText, setToText] = useState("");
-  const [subject, setSubject] = useState("Propel Swim Evaluations Export");
+  const [subject, setSubject] = useState("Propel Swim School — Evaluation Export");
   const [message, setMessage] = useState("");
   const [useCurrentFilters, setUseCurrentFilters] = useState(false);
   const [sending, setSending] = useState(false);
@@ -453,7 +556,7 @@ function ManagerDashboard({
     try {
       await onEmailCsv({
         to: recipients,
-        subject: subject.trim() || "Propel Swim Evaluations Export",
+        subject: subject.trim() || "Propel Swim School — Evaluation Export",
         message: message.trim() || undefined,
         filters: useCurrentFilters ? appliedManagerQuery : undefined,
       });
@@ -467,16 +570,15 @@ function ManagerDashboard({
     <>
       {/* Stat cards */}
       <div className="stat-cards">
-        <StatCard label="Total Evaluations" value={total} color="#0a3d62" />
-        <StatCard label="Draft / Pending" value={draft} color="#1565c0" />
-        <StatCard label="Submitted" value={submitted} color="#0f766e" />
-        <StatCard label="Recent 7 Days" value={recent7d} color="#7c3aed" />
+        <StatCard label="Total Evaluations" value={total} color="#023e8a" />
+        <StatCard label="Submitted" value={submitted} color="#0077b6" />
+        <StatCard label="Pending / Draft" value={draft} color="#f59e0b" />
+        <StatCard label="Sessions This Week" value={recent7d} color="#0f9b8e" />
       </div>
 
-      {/* Key insight */}
       {draft > 0 && (
         <div className="key-insight">
-          <span className="key-insight-icon">💡</span>
+          <span className="key-insight-icon">🏊</span>
           <span className="key-insight-text">
             <strong>{draft}</strong> evaluation{draft !== 1 ? "s" : ""} awaiting submission.
           </span>
@@ -486,21 +588,21 @@ function ManagerDashboard({
       {/* Quick actions */}
       <div className="card" style={{ padding: "16px 24px" }}>
         <div className="dash-actions">
-          <button onClick={() => onGo("users")}>Manage Users</button>
-          <button onClick={onConfigureTemplates}>Templates</button>
-          <button onClick={() => onGo("levels")}>Levels</button>
-          <button onClick={() => onGo("skills")}>Skills</button>
-          <button onClick={() => onGo("evaluations")}>All Evaluations</button>
-          <button onClick={onExportCsv}>Export CSV</button>
+          <button onClick={() => onGo("users")}>👤 Manage Users</button>
+          <button onClick={onConfigureTemplates}>📋 Templates</button>
+          <button onClick={() => onGo("levels")}>🌊 Levels</button>
+          <button onClick={() => onGo("skills")}>🏅 Skills</button>
+          <button onClick={() => onGo("evaluations")}>📊 All Evaluations</button>
+          <button onClick={onExportCsv}>⬇ Export CSV</button>
           <button onClick={() => setShowEmail((p) => !p)}>
-            {showEmail ? "✕ Close Email" : "Email CSV"}
+            {showEmail ? "✕ Close Email" : "✉ Email CSV"}
           </button>
         </div>
         {showEmail && (
           <form className="form" onSubmit={onSubmitEmail} style={{ marginTop: 16, marginBottom: 0 }}>
             <label>
               To (comma-separated)
-              <input value={toText} onChange={(e) => setToText(e.target.value)} placeholder="someone@example.com" required />
+              <input value={toText} onChange={(e) => setToText(e.target.value)} placeholder="coach@propelswim.com" required />
             </label>
             <label>
               Subject
@@ -520,47 +622,82 @@ function ManagerDashboard({
         )}
       </div>
 
-      {/* Performance overview + distribution */}
+      {/* Charts: status donut + monthly trend */}
       <div className="two-col">
         <div className="card">
-          <h2>Performance Overview</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Instructor</th>
-                <th>Supervisor</th>
-                <th>Level</th>
-                <th>Date</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recent.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.instructor_name}</td>
-                  <td>{row.supervisor_name}</td>
-                  <td>{row.level_name}</td>
-                  <td>{row.session_date}</td>
-                  <td>
-                    <span className={row.status === "SUBMITTED" ? "badge-submitted" : "badge-draft"}>
-                      {row.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {recent.length === 0 && (
-                <tr>
-                  <td colSpan={5} style={{ color: "#64748b" }}>No evaluations yet.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          <h2>Status Distribution</h2>
+          <DonutChart submitted={submitted} draft={draft} total={total} />
         </div>
 
         <div className="card">
-          <h2>Distribution</h2>
-          <DonutChart submitted={submitted} draft={draft} total={total} />
+          <h2>Monthly Volume</h2>
+          {monthlyData.length > 0 ? (
+            <BarChart data={monthlyData} labelWidth={80} />
+          ) : (
+            <p style={{ color: "#64748b", fontSize: 14 }}>No session data yet.</p>
+          )}
         </div>
+      </div>
+
+      {/* Charts: instructor performance + skill breakdown */}
+      <div className="two-col">
+        <div className="card">
+          <h2>Instructor Performance</h2>
+          <p className="chart-section-title">Total evaluations per instructor</p>
+          {instructorData.length > 0 ? (
+            <BarChart data={instructorData} />
+          ) : (
+            <p style={{ color: "#64748b", fontSize: 14 }}>No data yet.</p>
+          )}
+        </div>
+
+        <div className="card">
+          <h2>Stroke & Skill Breakdown</h2>
+          <p className="chart-section-title">Evaluations by skill area</p>
+          {skillData.length > 0 ? (
+            <BarChart data={skillData} />
+          ) : (
+            <p style={{ color: "#64748b", fontSize: 14 }}>No data yet.</p>
+          )}
+        </div>
+      </div>
+
+      {/* Recent evaluations */}
+      <div className="card">
+        <h2>Recent Evaluations</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Instructor</th>
+              <th>Supervisor</th>
+              <th>Level</th>
+              <th>Skill</th>
+              <th>Date</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {recent.map((row) => (
+              <tr key={row.id}>
+                <td>{row.instructor_name}</td>
+                <td>{row.supervisor_name}</td>
+                <td>{row.level_name}</td>
+                <td>{row.skill_name}</td>
+                <td>{row.session_date}</td>
+                <td>
+                  <span className={row.status === "SUBMITTED" ? "badge-submitted" : "badge-draft"}>
+                    {row.status === "SUBMITTED" ? "Submitted" : "Draft"}
+                  </span>
+                </td>
+              </tr>
+            ))}
+            {recent.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ color: "#64748b" }}>No evaluations yet.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </>
   );

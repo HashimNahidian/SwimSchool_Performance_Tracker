@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth";
-import { ShieldLogo } from "../components/ShieldLogo";
+import { WaveLogo } from "../components/WaveLogo";
 
 export function LoginPage() {
   const { login, user } = useAuth();
@@ -31,9 +31,9 @@ export function LoginPage() {
     <div className="login-bg">
       <div className="login-card">
         <div className="login-logo">
-          <ShieldLogo size={72} color="#1a4080" />
-          <h1 className="login-brand">DATASHIELD 5</h1>
-          <p className="login-subtitle">Performance Tracking</p>
+          <WaveLogo size={80} light />
+          <h1 className="login-brand">PROPEL SWIM SCHOOL</h1>
+          <p className="login-subtitle">Instructor Evaluation Portal</p>
         </div>
 
         <form onSubmit={onSubmit} className="login-form">
@@ -44,7 +44,7 @@ export function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="manager@propel.local"
+              placeholder="instructor@propelswim.com"
               className="login-input"
             />
           </label>

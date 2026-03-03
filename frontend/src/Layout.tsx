@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "./auth";
-import { ShieldLogo } from "./components/ShieldLogo";
+import { WaveLogo } from "./components/WaveLogo";
 import type { UserRole } from "./types";
 
 const ROLE_PATH: Record<UserRole, string> = {
@@ -25,8 +25,11 @@ export function Layout() {
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar-brand">
-          <ShieldLogo size={34} color="rgba(255,255,255,0.18)" />
-          <span className="topbar-title">DataShield 5</span>
+          <WaveLogo size={38} light />
+          <div>
+            <div className="topbar-title">Propel Swim School</div>
+            <div className="topbar-tagline">Instructor Evaluation Portal</div>
+          </div>
         </div>
 
         <nav className="topbar-nav">
