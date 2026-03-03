@@ -51,6 +51,17 @@ export type EvaluationSummary = {
   submitted_at: string | null;
 };
 
+export type RatingOut = {
+  attribute_id: number;
+  attribute_name: string;
+  rating_value: number;
+};
+
+export type EvaluationDetail = EvaluationSummary & {
+  notes: string | null;
+  ratings: RatingOut[];
+};
+
 export type TemplateCriterion = {
   attribute_id: number;
   attribute_name: string;

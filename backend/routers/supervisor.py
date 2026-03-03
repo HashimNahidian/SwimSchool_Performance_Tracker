@@ -38,6 +38,23 @@ def resolve_evaluation_template(
     return template_out(template)
 
 
+@router.get("/evaluations/{evaluation_id}", response_model=EvaluationDetailOut, dependencies=[supervisor_guard])
+def get_my_evaluation(
+    evaluation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
+) -> EvaluationDetailOut:
+    evaluation = db.scalar(
+        evaluation_query_with_joins(current_user.school_id).where(
+            Evaluation.id == evaluation_id,
+            Evaluation.supervisor_id == current_user.id,
+        )
+    )
+    if not evaluation:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    return evaluation_detail_row(evaluation)
+
+
 @router.get("/evaluations", response_model=list[EvaluationSummaryOut], dependencies=[supervisor_guard])
 def list_my_evaluations(
     db: Session = Depends(get_db), current_user: User = Depends(require_roles(UserRole.SUPERVISOR))

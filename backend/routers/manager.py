@@ -24,6 +24,7 @@ from models import (
 )
 from schemas import (
     AttributeOut,
+    EvaluationDetailOut,
     EvaluationSummaryOut,
     LevelBase,
     LevelOut,
@@ -40,6 +41,7 @@ from schemas import (
 )
 from security import hash_password
 from services import (
+    evaluation_detail_row,
     evaluation_query_with_joins,
     evaluation_summary_row,
     evaluations_to_csv,
@@ -346,6 +348,20 @@ def update_template(
     db.commit()
     db.refresh(template)
     return template_out(template)
+
+
+@router.get("/evaluations/{evaluation_id}", response_model=EvaluationDetailOut, dependencies=[manager_guard])
+def get_evaluation(
+    evaluation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> EvaluationDetailOut:
+    evaluation = db.scalar(
+        evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation_id)
+    )
+    if not evaluation:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    return evaluation_detail_row(evaluation)
 
 
 @router.get("/evaluations", response_model=list[EvaluationSummaryOut], dependencies=[manager_guard])

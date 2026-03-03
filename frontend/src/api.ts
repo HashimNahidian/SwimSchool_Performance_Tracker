@@ -1,5 +1,6 @@
 import type {
   Attribute,
+  EvaluationDetail,
   EvaluationSummary,
   Level,
   Skill,
@@ -217,4 +218,28 @@ export function emailEvaluationsCsv(
   }
 ): Promise<{ detail: string }> {
   return request("/manager/exports/evaluations/email", "POST", payload, token);
+}
+
+export function getInstructorEvaluationDetail(token: string, id: number): Promise<EvaluationDetail> {
+  return request(`/instructor/evaluations/${id}`, "GET", undefined, token);
+}
+
+export function getSupervisorEvaluationDetail(token: string, id: number): Promise<EvaluationDetail> {
+  return request(`/supervisor/evaluations/${id}`, "GET", undefined, token);
+}
+
+export function updateSupervisorEvaluation(
+  token: string,
+  id: number,
+  payload: { notes?: string | null; ratings?: Array<{ attribute_id: number; rating_value: number }> }
+): Promise<EvaluationDetail> {
+  return request(`/supervisor/evaluations/${id}`, "PUT", payload, token);
+}
+
+export function submitSupervisorEvaluation(token: string, id: number): Promise<EvaluationDetail> {
+  return request(`/supervisor/evaluations/${id}/submit`, "POST", undefined, token);
+}
+
+export function getManagerEvaluationDetail(token: string, id: number): Promise<EvaluationDetail> {
+  return request(`/manager/evaluations/${id}`, "GET", undefined, token);
 }

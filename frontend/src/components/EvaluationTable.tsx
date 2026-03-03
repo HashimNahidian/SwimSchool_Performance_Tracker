@@ -1,6 +1,16 @@
 import type { EvaluationSummary } from "../types";
 
-export function EvaluationTable({ rows }: { rows: EvaluationSummary[] }) {
+export function EvaluationTable({
+  rows,
+  onView,
+  onEdit,
+}: {
+  rows: EvaluationSummary[];
+  onView?: (id: number) => void;
+  onEdit?: (id: number) => void;
+}) {
+  const hasActions = onView !== undefined || onEdit !== undefined;
+
   return (
     <table>
       <thead>
@@ -13,6 +23,7 @@ export function EvaluationTable({ rows }: { rows: EvaluationSummary[] }) {
           <th>Session</th>
           <th>Date</th>
           <th>Status</th>
+          {hasActions && <th>Actions</th>}
         </tr>
       </thead>
       <tbody>
@@ -27,9 +38,28 @@ export function EvaluationTable({ rows }: { rows: EvaluationSummary[] }) {
             <td>{row.session_date}</td>
             <td>
               <span className={row.status === "SUBMITTED" ? "badge-submitted" : "badge-draft"}>
-                {row.status}
+                {row.status === "SUBMITTED" ? "Submitted" : "Draft"}
               </span>
             </td>
+            {hasActions && (
+              <td>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {onView && (
+                    <button style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => onView(row.id)}>
+                      📄 View
+                    </button>
+                  )}
+                  {onEdit && row.status === "DRAFT" && (
+                    <button
+                      style={{ padding: "4px 10px", fontSize: 12, background: "#0096c7" }}
+                      onClick={() => onEdit(row.id)}
+                    >
+                      ✏ Edit
+                    </button>
+                  )}
+                </div>
+              </td>
+            )}
           </tr>
         ))}
       </tbody>

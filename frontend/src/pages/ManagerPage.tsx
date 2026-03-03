@@ -8,6 +8,7 @@ import {
   createUser,
   emailEvaluationsCsv,
   exportEvaluationsCsvUrl,
+  getManagerEvaluationDetail,
   listAttributes,
   listLevels,
   listManagerEvaluationsWithQuery,
@@ -16,11 +17,12 @@ import {
   listUsers,
   updateTemplate
 } from "../api";
-import type { Attribute, EvaluationSummary, Level, Skill, TemplateConfig, User, UserRole } from "../types";
+import type { Attribute, EvaluationDetail, EvaluationSummary, Level, Skill, TemplateConfig, User, UserRole } from "../types";
 import { Section } from "../components/Section";
 import { EvaluationTable } from "../components/EvaluationTable";
 import { DonutChart } from "../components/DonutChart";
 import { BarChart } from "../components/BarChart";
+import { EvaluationReportModal } from "../components/EvaluationReport";
 import { DEMO_EVALUATIONS, DEMO_LEVELS, DEMO_SKILLS, DEMO_USERS } from "../mockData";
 
 type ManagerTab = "dashboard" | "users" | "levels" | "skills" | "templates" | "evaluations";
@@ -73,6 +75,8 @@ export function ManagerPage() {
   const [templates, setTemplates] = useState<TemplateConfig[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
   const [isDemo, setIsDemo] = useState(false);
+  const [reportEval, setReportEval] = useState<EvaluationDetail | null>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
   const [filters, setFilters] = useState({
     instructor_id: "", supervisor_id: "", level_id: "", skill_id: "",
     rating_value: "", date_from: "", date_to: "", status: "",
@@ -130,6 +134,24 @@ export function ManagerPage() {
     await emailEvaluationsCsv(token, payload);
   }
 
+  async function handleViewReport(id: number) {
+    if (isDemo) {
+      const found = DEMO_EVALUATIONS.find((e) => e.id === id);
+      if (found) setReportEval({ ...found, notes: "Demo evaluation — no live data.", ratings: [] });
+      return;
+    }
+    if (!token) return;
+    setLoadingReport(true);
+    try {
+      const detail = await getManagerEvaluationDetail(token, id);
+      setReportEval(detail);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoadingReport(false);
+    }
+  }
+
   if (!token) return null;
 
   return (
@@ -164,6 +186,7 @@ export function ManagerPage() {
           onExportCsv={downloadCsv}
           onEmailCsv={sendCsvEmail}
           appliedManagerQuery={appliedQuery}
+          onView={handleViewReport}
         />
       )}
       {tab === "users" && (
@@ -183,7 +206,7 @@ export function ManagerPage() {
         />
       )}
       {tab === "evaluations" && (
-        <Section title="All Evaluations">
+        <Section title={`All Evaluations${loadingReport ? " — Loading report…" : ""}`}>
           <form className="form inline" onSubmit={(e) => { e.preventDefault(); setAppliedQuery(buildQuery(filters)); }}>
             <input placeholder="instructor id" value={filters.instructor_id}
               onChange={(e) => setFilters((p) => ({ ...p, instructor_id: e.target.value, offset: "0" }))} />
@@ -239,8 +262,12 @@ export function ManagerPage() {
             onClick={(e) => { if (!token) return; e.preventDefault(); downloadCsv(); }}>
             Export CSV
           </a>
-          <EvaluationTable rows={evaluations} />
+          <EvaluationTable rows={evaluations} onView={handleViewReport} />
         </Section>
+      )}
+
+      {reportEval && (
+        <EvaluationReportModal evaluation={reportEval} onClose={() => setReportEval(null)} />
       )}
     </>
   );
@@ -483,7 +510,7 @@ function monthLabel(dateStr: string) {
 }
 
 function ManagerDashboard({
-  rows, onGo, onConfigureTemplates, onExportCsv, onEmailCsv, appliedManagerQuery
+  rows, onGo, onConfigureTemplates, onExportCsv, onEmailCsv, appliedManagerQuery, onView
 }: {
   rows: EvaluationSummary[];
   onGo: (tab: ManagerTab) => void;
@@ -491,6 +518,7 @@ function ManagerDashboard({
   onExportCsv: () => void;
   onEmailCsv: (payload: { to: string[]; subject?: string; message?: string; filters?: ManagerEvaluationQuery }) => Promise<void>;
   appliedManagerQuery: ManagerEvaluationQuery;
+  onView?: (id: number) => void;
 }) {
   const { total, draft, submitted, recent7d, recent } = useMemo(() => {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -665,39 +693,11 @@ function ManagerDashboard({
       {/* Recent evaluations */}
       <div className="card">
         <h2>Recent Evaluations</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Instructor</th>
-              <th>Supervisor</th>
-              <th>Level</th>
-              <th>Skill</th>
-              <th>Date</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recent.map((row) => (
-              <tr key={row.id}>
-                <td>{row.instructor_name}</td>
-                <td>{row.supervisor_name}</td>
-                <td>{row.level_name}</td>
-                <td>{row.skill_name}</td>
-                <td>{row.session_date}</td>
-                <td>
-                  <span className={row.status === "SUBMITTED" ? "badge-submitted" : "badge-draft"}>
-                    {row.status === "SUBMITTED" ? "Submitted" : "Draft"}
-                  </span>
-                </td>
-              </tr>
-            ))}
-            {recent.length === 0 && (
-              <tr>
-                <td colSpan={6} style={{ color: "#64748b" }}>No evaluations yet.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        {recent.length > 0 ? (
+          <EvaluationTable rows={recent} onView={onView} />
+        ) : (
+          <p style={{ color: "#64748b", fontSize: 14 }}>No evaluations yet.</p>
+        )}
       </div>
     </>
   );
