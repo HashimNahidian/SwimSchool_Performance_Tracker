@@ -108,8 +108,6 @@ export function SupervisorPage() {
     setEvalTab("scheduled");
   }
 
-  if (!token) return null;
-
   const { drafts, submitted } = useMemo(() => {
     const drafts: typeof evaluations = [];
     const submitted: typeof evaluations = [];
@@ -141,6 +139,8 @@ export function SupervisorPage() {
   }, [evaluations]);
 
   const total = evaluations.length;
+
+  if (!token) return null;
 
   return (
     <>

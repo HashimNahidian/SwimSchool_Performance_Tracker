@@ -445,6 +445,15 @@ body {
 }
 
 /* ---- Demo mode banner ---- */
+.auth-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  font-size: 16px;
+  color: #64748b;
+}
+
 .demo-banner {
   background: linear-gradient(90deg, #fff8e1, #fffde7);
   border: 1.5px solid #f59e0b;

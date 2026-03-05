@@ -9,7 +9,11 @@ export function ProtectedRoute({
   children: JSX.Element;
   allowedRoles: UserRole[];
 }) {
-  const { user } = useAuth();
+  const { user, ready } = useAuth();
+
+  if (!ready) {
+    return <div className="auth-loading">Loading…</div>;
+  }
   if (!user) {
     return <Navigate to="/login" replace />;
   }

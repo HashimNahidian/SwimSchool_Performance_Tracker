@@ -1,10 +1,11 @@
-import { createContext, useContext, useMemo, useState } from "react";
-import { login as apiLogin, me as apiMe } from "./api";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { login as apiLogin, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./api";
 import type { User } from "./types";
 
 interface AuthContextValue {
   user: User | null;
   token: string | null;
+  ready: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -12,6 +13,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const TOKEN_KEY = "propel_token";
+const REFRESH_KEY = "propel_refresh";
 const USER_KEY = "propel_user";
 
 function readUser(): User | null {
@@ -24,30 +26,83 @@ function readUser(): User | null {
   }
 }
 
+function clearSession() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+  localStorage.removeItem(USER_KEY);
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(localStorage.getItem(TOKEN_KEY));
   const [user, setUser] = useState<User | null>(readUser());
+  const [ready, setReady] = useState(false);
+
+  // On mount: validate stored access token, refresh if expired, clear if unrecoverable.
+  useEffect(() => {
+    const storedToken = localStorage.getItem(TOKEN_KEY);
+    const storedRefresh = localStorage.getItem(REFRESH_KEY);
+
+    if (!storedToken) {
+      setReady(true);
+      return;
+    }
+
+    apiMe(storedToken)
+      .then((userData) => {
+        setUser(userData);
+        localStorage.setItem(USER_KEY, JSON.stringify(userData));
+        setReady(true);
+      })
+      .catch(() => {
+        if (!storedRefresh) {
+          setToken(null);
+          setUser(null);
+          clearSession();
+          setReady(true);
+          return;
+        }
+
+        apiRefresh(storedRefresh)
+          .then(async (data) => {
+            setToken(data.access_token);
+            localStorage.setItem(TOKEN_KEY, data.access_token);
+            localStorage.setItem(REFRESH_KEY, data.refresh_token);
+            const userData = await apiMe(data.access_token);
+            setUser(userData);
+            localStorage.setItem(USER_KEY, JSON.stringify(userData));
+          })
+          .catch(() => {
+            setToken(null);
+            setUser(null);
+            clearSession();
+          })
+          .finally(() => setReady(true));
+      });
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
       token,
+      ready,
       login: async (email: string, password: string) => {
         const data = await apiLogin(email, password);
         const userData = await apiMe(data.access_token);
         setToken(data.access_token);
         setUser(userData);
         localStorage.setItem(TOKEN_KEY, data.access_token);
+        localStorage.setItem(REFRESH_KEY, data.refresh_token);
         localStorage.setItem(USER_KEY, JSON.stringify(userData));
       },
       logout: () => {
+        const rt = localStorage.getItem(REFRESH_KEY);
+        if (rt) apiLogout(rt).catch(() => {});
         setToken(null);
         setUser(null);
-        localStorage.removeItem(TOKEN_KEY);
-        localStorage.removeItem(USER_KEY);
+        clearSession();
       }
     }),
-    [token, user]
+    [token, user, ready]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
