@@ -395,6 +395,11 @@ body {
   gap: 16px;
 }
 
+.supervisor-stat-cards {
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  max-width: 640px;
+}
+
 .stat-card {
   background: white;
   border-radius: 14px;
@@ -840,6 +845,52 @@ tr:hover td {
   gap: 12px;
 }
 
+.edit-modal-body {
+  padding: 20px 24px;
+}
+
+.edit-modal-info-grid {
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  margin-top: 2px;
+  margin-bottom: 16px;
+}
+
+.edit-ratings-fieldset {
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid #bbd6ea;
+}
+
+.edit-rating-row {
+  margin-bottom: 10px;
+}
+
+.edit-rating-label {
+  min-width: 220px;
+}
+
+.edit-ratings-empty {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed #bbd6ea;
+  background: #f8fbff;
+  color: #5b708b;
+  font-size: 14px;
+}
+
+.edit-modal-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.edit-modal-confirm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 /* ============================================================
    Evaluation Report
    ============================================================ */
@@ -1067,6 +1118,7 @@ tr:hover td {
 @media (max-width: 1260px) {
   .content { max-width: 100%; }
   .stat-cards { grid-template-columns: repeat(2, 1fr); }
+  .supervisor-stat-cards { max-width: none; }
 }
 
 @media (max-width: 900px) {
@@ -1077,6 +1129,8 @@ tr:hover td {
   .stat-cards { grid-template-columns: repeat(2, 1fr); }
   .two-col { grid-template-columns: 1fr; }
   .tabs { overflow-x: auto; flex-wrap: nowrap; }
+  .edit-modal-info-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+  .edit-rating-label { min-width: 150px; }
 }
 
 @media (max-width: 600px) {
@@ -1085,6 +1139,14 @@ tr:hover td {
   table { display: block; overflow-x: auto; white-space: nowrap; }
   .topbar-user { display: none; }
   .stat-cards { grid-template-columns: 1fr 1fr; }
+  .supervisor-stat-cards { grid-template-columns: 1fr; }
   .two-col { grid-template-columns: 1fr; }
   .topbar-nav { display: none; }
+  .modal-overlay { padding: 10px; }
+  .edit-modal-body { padding: 14px; }
+  .edit-modal-info-grid { grid-template-columns: 1fr; }
+  .modal-toolbar { padding: 12px 14px; }
+  .modal-toolbar > span { font-size: 14px !important; }
+  .edit-rating-row { flex-direction: column; align-items: stretch; gap: 6px; }
+  .edit-rating-label { min-width: 0; }
 }

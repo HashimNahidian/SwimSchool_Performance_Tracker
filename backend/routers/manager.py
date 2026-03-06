@@ -4,6 +4,7 @@ import smtplib
 from email.message import EmailMessage
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import and_, asc, desc, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -36,6 +37,7 @@ from schemas import (
     TemplateOut,
     TemplateUpdate,
     UserCreate,
+    UserUpdate,
     UserOut,
     ExportEmailRequest,
 )
@@ -167,6 +169,7 @@ def create_user(
         school_id=current_user.school_id,
         name=payload.name,
         email=normalized_email,
+        phone=payload.phone.strip() if payload.phone else None,
         password_hash=hash_password(payload.password),
         role=payload.role,
         active=payload.active,
@@ -175,6 +178,65 @@ def create_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.put("/users/{user_id}", response_model=UserOut, dependencies=[manager_guard])
+def update_user(
+    user_id: int,
+    payload: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> User:
+    user = db.scalar(select(User).where(User.id == user_id, User.school_id == current_user.school_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "email" in updates:
+        normalized_email = updates["email"].strip().lower()
+        existing = db.scalar(
+            select(User.id).where(
+                User.school_id == current_user.school_id,
+                User.email == normalized_email,
+                User.id != user.id,
+            )
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already exists")
+        updates["email"] = normalized_email
+    if "phone" in updates and updates["phone"] is not None:
+        updates["phone"] = updates["phone"].strip() or None
+    if "password" in updates:
+        raw_password = updates.pop("password")
+        if raw_password:
+            user.password_hash = hash_password(raw_password)
+    for field, value in updates.items():
+        setattr(user, field, value)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.delete("/users/{user_id}", status_code=204, dependencies=[manager_guard])
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> None:
+    user = db.scalar(select(User).where(User.id == user_id, User.school_id == current_user.school_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    try:
+        db.delete(user)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="User cannot be deleted because they are referenced by existing records",
+        ) from exc
 
 
 @router.get("/levels", response_model=list[LevelOut], dependencies=[manager_guard])
@@ -215,6 +277,26 @@ def update_level(
     db.commit()
     db.refresh(level)
     return level
+
+
+@router.delete("/levels/{level_id}", status_code=204, dependencies=[manager_guard])
+def delete_level(
+    level_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> None:
+    level = db.scalar(select(Level).where(Level.id == level_id, Level.school_id == current_user.school_id))
+    if not level:
+        raise HTTPException(status_code=404, detail="Level not found")
+    try:
+        db.delete(level)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Level cannot be deleted because it is referenced by existing skills or evaluations",
+        ) from exc
 
 
 @router.get("/skills", response_model=list[SkillOut], dependencies=[manager_guard])
@@ -276,6 +358,26 @@ def update_skill(
     db.commit()
     db.refresh(skill)
     return skill
+
+
+@router.delete("/skills/{skill_id}", status_code=204, dependencies=[manager_guard])
+def delete_skill(
+    skill_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> None:
+    skill = db.scalar(select(Skill).where(Skill.id == skill_id, Skill.school_id == current_user.school_id))
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    try:
+        db.delete(skill)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Skill cannot be deleted because it is referenced by existing evaluations or templates",
+        ) from exc
 
 
 @router.get("/templates", response_model=list[TemplateOut], dependencies=[manager_guard])

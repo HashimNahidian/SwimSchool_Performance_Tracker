@@ -440,3 +440,44 @@ def test_manager_can_update_template_attributes_and_active_state(client: TestCli
     assert payload["active"] is False
     assert len(payload["attributes"]) == 1
     assert payload["attributes"][0]["attribute_id"] == attr_b.id
+
+
+def test_manager_can_update_user_with_phone(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "manager5@test.local", models.UserRole.MANAGER, school.id)
+    target = create_user(db_session, "Coach User", "coach@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    headers = auth_headers(client, "manager5@test.local")
+    response = client.put(
+        f"/manager/users/{target.id}",
+        headers=headers,
+        json={
+            "name": "Coach Updated",
+            "email": "coach.updated@test.local",
+            "phone": "555-0102",
+            "role": "SUPERVISOR",
+            "active": False,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["name"] == "Coach Updated"
+    assert payload["email"] == "coach.updated@test.local"
+    assert payload["phone"] == "555-0102"
+    assert payload["role"] == "SUPERVISOR"
+    assert payload["active"] is False
+
+
+def test_manager_can_delete_user(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "manager6@test.local", models.UserRole.MANAGER, school.id)
+    target = create_user(db_session, "Delete User", "delete.me@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    headers = auth_headers(client, "manager6@test.local")
+    delete_response = client.delete(f"/manager/users/{target.id}", headers=headers)
+    assert delete_response.status_code == 204
+
+    users_response = client.get("/manager/users", headers=headers)
+    assert users_response.status_code == 200
+    emails = [item["email"] for item in users_response.json()]
+    assert "delete.me@test.local" not in emails

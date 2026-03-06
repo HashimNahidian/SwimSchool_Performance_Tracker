@@ -23,9 +23,19 @@ class RefreshRequest(BaseModel):
 class UserCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     email: str = Field(min_length=3, max_length=255)
+    phone: str | None = Field(default=None, max_length=25)
     password: str = Field(min_length=8)
     role: UserRole
     active: bool = True
+
+
+class UserUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    email: str | None = Field(default=None, min_length=3, max_length=255)
+    phone: str | None = Field(default=None, max_length=25)
+    role: UserRole | None = None
+    active: bool | None = None
+    password: str | None = Field(default=None, min_length=8)
 
 
 class UserOut(BaseModel):
@@ -35,6 +45,7 @@ class UserOut(BaseModel):
     school_id: int
     name: str
     email: str
+    phone: str | None
     role: UserRole
     active: bool
 

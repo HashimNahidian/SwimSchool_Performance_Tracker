@@ -70,12 +70,32 @@ export function createUser(
   payload: {
     name: string;
     email: string;
+    phone?: string | null;
     password: string;
     role: "MANAGER" | "SUPERVISOR" | "INSTRUCTOR";
     active: boolean;
   }
 ): Promise<User> {
   return request("/manager/users", "POST", payload, token);
+}
+
+export function updateUser(
+  token: string,
+  userId: number,
+  payload: {
+    name?: string;
+    email?: string;
+    phone?: string | null;
+    role?: "MANAGER" | "SUPERVISOR" | "INSTRUCTOR";
+    active?: boolean;
+    password?: string;
+  }
+): Promise<User> {
+  return request(`/manager/users/${userId}`, "PUT", payload, token);
+}
+
+export function deleteUser(token: string, userId: number): Promise<void> {
+  return request(`/manager/users/${userId}`, "DELETE", undefined, token);
 }
 
 export function listLevels(token: string): Promise<Level[]> {
@@ -89,6 +109,18 @@ export function createLevel(
   return request("/manager/levels", "POST", payload, token);
 }
 
+export function updateLevel(
+  token: string,
+  levelId: number,
+  payload: { name?: string; active?: boolean }
+): Promise<Level> {
+  return request(`/manager/levels/${levelId}`, "PUT", payload, token);
+}
+
+export function deleteLevel(token: string, levelId: number): Promise<void> {
+  return request(`/manager/levels/${levelId}`, "DELETE", undefined, token);
+}
+
 export function listSkills(token: string): Promise<Skill[]> {
   return request("/manager/skills", "GET", undefined, token);
 }
@@ -98,6 +130,18 @@ export function createSkill(
   payload: { level_id: number; name: string; description?: string; active: boolean }
 ): Promise<Skill> {
   return request("/manager/skills", "POST", payload, token);
+}
+
+export function updateSkill(
+  token: string,
+  skillId: number,
+  payload: { level_id?: number; name?: string; description?: string | null; active?: boolean }
+): Promise<Skill> {
+  return request(`/manager/skills/${skillId}`, "PUT", payload, token);
+}
+
+export function deleteSkill(token: string, skillId: number): Promise<void> {
+  return request(`/manager/skills/${skillId}`, "DELETE", undefined, token);
 }
 
 export function listAttributes(token: string): Promise<Attribute[]> {

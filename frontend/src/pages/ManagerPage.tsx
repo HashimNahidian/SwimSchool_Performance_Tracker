@@ -6,6 +6,9 @@ import {
   createSkill,
   createTemplate,
   createUser,
+  deleteLevel,
+  deleteSkill,
+  deleteUser,
   emailEvaluationsCsv,
   exportEvaluationsCsvUrl,
   getManagerEvaluationDetail,
@@ -15,6 +18,9 @@ import {
   listSkills,
   listTemplates,
   listUsers,
+  updateLevel,
+  updateSkill,
+  updateUser,
   updateTemplate
 } from "../api";
 import type { Attribute, EvaluationDetail, EvaluationSummary, Level, Skill, TemplateConfig, User, UserRole } from "../types";
@@ -25,13 +31,14 @@ import { BarChart } from "../components/BarChart";
 import { EvaluationReportModal } from "../components/EvaluationReport";
 import { DEMO_EVALUATIONS, DEMO_LEVELS, DEMO_SKILLS, DEMO_USERS } from "../mockData";
 
-type ManagerTab = "dashboard" | "users" | "levels" | "skills" | "templates" | "evaluations";
+type ManagerTab = "dashboard" | "users" | "levels" | "templates" | "evaluations";
 
-const MANAGER_TABS: ManagerTab[] = ["dashboard", "users", "levels", "skills", "templates", "evaluations"];
+const MANAGER_TABS: ManagerTab[] = ["dashboard", "users", "levels", "templates", "evaluations"];
 
 const SORT_FIELDS = new Set<NonNullable<ManagerEvaluationQuery["sort_by"]>>([
   "id", "session_date", "submitted_at", "instructor_id", "supervisor_id", "level_id", "skill_id"
 ]);
+const EVALUATIONS_PAGE_SIZE = 25;
 
 function parsePositiveInt(value: string): number | undefined {
   if (!value.trim()) return undefined;
@@ -40,10 +47,7 @@ function parsePositiveInt(value: string): number | undefined {
 }
 
 function buildQuery(filters: Record<string, string>): ManagerEvaluationQuery {
-  const q: ManagerEvaluationQuery = {
-    limit: parsePositiveInt(filters.limit) ?? 50,
-    offset: parsePositiveInt(filters.offset) ?? 0
-  };
+  const q: ManagerEvaluationQuery = {};
   const instructorId = parsePositiveInt(filters.instructor_id);
   const supervisorId = parsePositiveInt(filters.supervisor_id);
   const levelId = parsePositiveInt(filters.level_id);
@@ -80,11 +84,12 @@ export function ManagerPage() {
   const [filters, setFilters] = useState({
     instructor_id: "", supervisor_id: "", level_id: "", skill_id: "",
     rating_value: "", date_from: "", date_to: "", status: "",
-    sort_by: "submitted_at", sort_dir: "desc", limit: "50", offset: "0"
+    sort_by: "submitted_at", sort_dir: "desc"
   });
   const [appliedQuery, setAppliedQuery] = useState<ManagerEvaluationQuery>({
-    sort_by: "submitted_at", sort_dir: "desc", limit: 50, offset: 0
+    sort_by: "submitted_at", sort_dir: "desc", limit: EVALUATIONS_PAGE_SIZE, offset: 0
   });
+  const [evaluationsPage, setEvaluationsPage] = useState(0);
 
   useEffect(() => {
     if (!token) return;
@@ -171,7 +176,6 @@ export function ManagerPage() {
             {item === "dashboard" ? "🏊 Dashboard" :
              item === "users" ? "👤 Users" :
              item === "levels" ? "🌊 Levels" :
-             item === "skills" ? "🏅 Skills" :
              item === "templates" ? "📋 Templates" :
              "📊 Evaluations"}
           </button>
@@ -190,13 +194,29 @@ export function ManagerPage() {
         />
       )}
       {tab === "users" && (
-        <ManagerUsers token={token} users={users} onCreated={(u) => setUsers((p) => [...p, u])} />
+        <ManagerUsers
+          token={token}
+          users={users}
+          onCreated={(u) => setUsers((p) => [...p, u])}
+          onUpdated={(u) => setUsers((p) => p.map((item) => (item.id === u.id ? u : item)))}
+          onDeleted={(id) => setUsers((p) => p.filter((item) => item.id !== id))}
+        />
       )}
       {tab === "levels" && (
-        <ManagerLevels token={token} levels={levels} onCreated={(l) => setLevels((p) => [...p, l])} />
-      )}
-      {tab === "skills" && (
-        <ManagerSkills token={token} levels={levels} skills={skills} onCreated={(s) => setSkills((p) => [...p, s])} />
+        <ManagerLevels
+          token={token}
+          levels={levels}
+          skills={skills}
+          onLevelCreated={(l) => setLevels((p) => [...p, l])}
+          onLevelUpdated={(l) => setLevels((p) => p.map((item) => (item.id === l.id ? l : item)))}
+          onLevelDeleted={(levelId) => {
+            setLevels((p) => p.filter((item) => item.id !== levelId));
+            setSkills((p) => p.filter((item) => item.level_id !== levelId));
+          }}
+          onSkillCreated={(s) => setSkills((p) => [...p, s])}
+          onSkillUpdated={(s) => setSkills((p) => p.map((item) => (item.id === s.id ? s : item)))}
+          onSkillDeleted={(skillId) => setSkills((p) => p.filter((item) => item.id !== skillId))}
+        />
       )}
       {tab === "templates" && (
         <ManagerTemplates
@@ -207,40 +227,36 @@ export function ManagerPage() {
       )}
       {tab === "evaluations" && (
         <Section title={`All Evaluations${loadingReport ? " — Loading report…" : ""}`}>
-          <form className="form inline" onSubmit={(e) => { e.preventDefault(); setAppliedQuery(buildQuery(filters)); }}>
+          <form className="form inline" onSubmit={(e) => { e.preventDefault(); setEvaluationsPage(0); setAppliedQuery({ ...buildQuery(filters), limit: EVALUATIONS_PAGE_SIZE, offset: 0 }); }}>
             <input placeholder="instructor id" value={filters.instructor_id}
-              onChange={(e) => setFilters((p) => ({ ...p, instructor_id: e.target.value, offset: "0" }))} />
+              onChange={(e) => setFilters((p) => ({ ...p, instructor_id: e.target.value }))} />
             <input placeholder="supervisor id" value={filters.supervisor_id}
-              onChange={(e) => setFilters((p) => ({ ...p, supervisor_id: e.target.value, offset: "0" }))} />
+              onChange={(e) => setFilters((p) => ({ ...p, supervisor_id: e.target.value }))} />
             <select value={filters.level_id}
-              onChange={(e) => setFilters((p) => ({ ...p, level_id: e.target.value, offset: "0" }))}>
+              onChange={(e) => setFilters((p) => ({ ...p, level_id: e.target.value }))}>
               <option value="">all levels</option>
               {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
             <select value={filters.skill_id}
-              onChange={(e) => setFilters((p) => ({ ...p, skill_id: e.target.value, offset: "0" }))}>
+              onChange={(e) => setFilters((p) => ({ ...p, skill_id: e.target.value }))}>
               <option value="">all skills</option>
               {skills.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <select value={filters.rating_value}
-              onChange={(e) => setFilters((p) => ({ ...p, rating_value: e.target.value, offset: "0" }))}>
+              onChange={(e) => setFilters((p) => ({ ...p, rating_value: e.target.value }))}>
               <option value="">all ratings</option>
               <option value="1">1 — Remediate</option>
               <option value="2">2 — Meets</option>
               <option value="3">3 — Exceeds</option>
             </select>
             <select value={filters.status}
-              onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value, offset: "0" }))}>
+              onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value }))}>
               <option value="">all statuses</option>
               <option value="DRAFT">Draft</option>
               <option value="SUBMITTED">Submitted</option>
             </select>
-            <input type="date" value={filters.date_from}
-              onChange={(e) => setFilters((p) => ({ ...p, date_from: e.target.value, offset: "0" }))} />
-            <input type="date" value={filters.date_to}
-              onChange={(e) => setFilters((p) => ({ ...p, date_to: e.target.value, offset: "0" }))} />
             <select value={filters.sort_by}
-              onChange={(e) => setFilters((p) => ({ ...p, sort_by: e.target.value, offset: "0" }))}>
+              onChange={(e) => setFilters((p) => ({ ...p, sort_by: e.target.value }))}>
               <option value="submitted_at">submitted at</option>
               <option value="session_date">session date</option>
               <option value="id">id</option>
@@ -248,14 +264,46 @@ export function ManagerPage() {
               <option value="supervisor_id">supervisor</option>
             </select>
             <select value={filters.sort_dir}
-              onChange={(e) => setFilters((p) => ({ ...p, sort_dir: e.target.value, offset: "0" }))}>
+              onChange={(e) => setFilters((p) => ({ ...p, sort_dir: e.target.value }))}>
               <option value="desc">newest first</option>
               <option value="asc">oldest first</option>
             </select>
-            <input placeholder="limit" value={filters.limit}
-              onChange={(e) => setFilters((p) => ({ ...p, limit: e.target.value }))} />
-            <input placeholder="offset" value={filters.offset}
-              onChange={(e) => setFilters((p) => ({ ...p, offset: e.target.value }))} />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                border: "1.5px solid #bbd6ea",
+                borderRadius: 8,
+                padding: "0 8px",
+                background: "white",
+                minHeight: 40,
+                gridColumn: "span 2",
+              }}
+            >
+              <input
+                type={filters.date_from ? "date" : "text"}
+                placeholder="Start Date"
+                value={filters.date_from}
+                onChange={(e) => setFilters((p) => ({ ...p, date_from: e.target.value }))}
+                onFocus={(e) => { e.currentTarget.type = "date"; }}
+                onBlur={(e) => {
+                  if (!e.currentTarget.value) e.currentTarget.type = "text";
+                }}
+                style={{ border: "none", boxShadow: "none", padding: "8px 4px", minWidth: 130 }}
+              />
+              <input
+                type={filters.date_to ? "date" : "text"}
+                placeholder="End Date"
+                value={filters.date_to}
+                onChange={(e) => setFilters((p) => ({ ...p, date_to: e.target.value }))}
+                onFocus={(e) => { e.currentTarget.type = "date"; }}
+                onBlur={(e) => {
+                  if (!e.currentTarget.value) e.currentTarget.type = "text";
+                }}
+                style={{ border: "none", boxShadow: "none", padding: "8px 4px", minWidth: 130 }}
+              />
+            </div>
             <button type="submit">Apply Filters</button>
           </form>
           <a href={exportEvaluationsCsvUrl()} target="_blank" rel="noreferrer" className="button-link"
@@ -263,6 +311,33 @@ export function ManagerPage() {
             Export CSV
           </a>
           <EvaluationTable rows={evaluations} onView={handleViewReport} />
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 12 }}>
+            <button
+              type="button"
+              className="btn-add"
+              disabled={evaluationsPage === 0}
+              onClick={() => {
+                const nextPage = Math.max(0, evaluationsPage - 1);
+                setEvaluationsPage(nextPage);
+                setAppliedQuery((prev) => ({ ...prev, limit: EVALUATIONS_PAGE_SIZE, offset: nextPage * EVALUATIONS_PAGE_SIZE }));
+              }}
+            >
+              Previous
+            </button>
+            <span style={{ fontSize: 13, color: "#64748b" }}>Page {evaluationsPage + 1}</span>
+            <button
+              type="button"
+              className="btn-add"
+              disabled={evaluations.length < EVALUATIONS_PAGE_SIZE}
+              onClick={() => {
+                const nextPage = evaluationsPage + 1;
+                setEvaluationsPage(nextPage);
+                setAppliedQuery((prev) => ({ ...prev, limit: EVALUATIONS_PAGE_SIZE, offset: nextPage * EVALUATIONS_PAGE_SIZE }));
+              }}
+            >
+              Next
+            </button>
+          </div>
         </Section>
       )}
 
@@ -275,17 +350,108 @@ export function ManagerPage() {
 
 /* ---- Sub-components ---- */
 
-function ManagerUsers({ token, users, onCreated }: { token: string; users: User[]; onCreated: (u: User) => void }) {
+function ManagerUsers({
+  token,
+  users,
+  onCreated,
+  onUpdated,
+  onDeleted,
+}: {
+  token: string;
+  users: User[];
+  onCreated: (u: User) => void;
+  onUpdated: (u: User) => void;
+  onDeleted: (id: number) => void;
+}) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<UserRole>("INSTRUCTOR");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editRole, setEditRole] = useState<UserRole>("INSTRUCTOR");
+  const [editActive, setEditActive] = useState(true);
+  const [editPassword, setEditPassword] = useState("");
+  const [error, setError] = useState("");
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const user = await createUser(token, { name, email, password, role, active: true });
-    onCreated(user);
-    setName(""); setEmail(""); setPassword("");
+    try {
+      setError("");
+      const user = await createUser(token, {
+        name,
+        email,
+        phone: phone.trim() || null,
+        password,
+        role,
+        active: true,
+      });
+      onCreated(user);
+      setName("");
+      setEmail("");
+      setPhone("");
+      setPassword("");
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  function beginEdit(user: User) {
+    setEditingId(user.id);
+    setEditName(user.name);
+    setEditEmail(user.email);
+    setEditPhone(user.phone ?? "");
+    setEditRole(user.role);
+    setEditActive(user.active);
+    setEditPassword("");
+    setError("");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditPassword("");
+  }
+
+  async function saveEdit(userId: number) {
+    try {
+      setError("");
+      const payload: {
+        name: string;
+        email: string;
+        phone: string | null;
+        role: UserRole;
+        active: boolean;
+        password?: string;
+      } = {
+        name: editName,
+        email: editEmail,
+        phone: editPhone.trim() || null,
+        role: editRole,
+        active: editActive,
+      };
+      if (editPassword.trim()) payload.password = editPassword.trim();
+      const updated = await updateUser(token, userId, payload);
+      onUpdated(updated);
+      cancelEdit();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function removeUser(user: User) {
+    const confirmed = window.confirm(`Delete user ${user.name}?`);
+    if (!confirmed) return;
+    try {
+      setError("");
+      await deleteUser(token, user.id);
+      onDeleted(user.id);
+      if (editingId === user.id) cancelEdit();
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
 
   const instructors = users.filter((u) => u.role === "INSTRUCTOR");
@@ -297,6 +463,7 @@ function ManagerUsers({ token, users, onCreated }: { token: string; users: User[
       <form className="form inline" onSubmit={onSubmit}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" required />
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" type="email" required />
+        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone (optional)" />
         <input value={password} onChange={(e) => setPassword(e.target.value)}
           placeholder="Password (8+ chars)" minLength={8} type="password" required />
         <select value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
@@ -306,17 +473,70 @@ function ManagerUsers({ token, users, onCreated }: { token: string; users: User[
         </select>
         <button type="submit">Add User</button>
       </form>
+      {error && <p className="error">{error}</p>}
 
       {[{ label: "Instructors", list: instructors }, { label: "Supervisors", list: supervisors }, { label: "Managers", list: managers }].map(({ label, list }) => (
         list.length > 0 && (
           <div key={label} style={{ marginBottom: 20 }}>
             <p className="chart-section-title">{label} ({list.length})</p>
             <table>
-              <thead><tr><th>Name</th><th>Email</th><th>Active</th></tr></thead>
+              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Active</th><th>Actions</th></tr></thead>
               <tbody>
                 {list.map((u) => (
                   <tr key={u.id}>
-                    <td>{u.name}</td><td>{u.email}</td><td>{u.active ? "Yes" : "No"}</td>
+                    {editingId === u.id ? (
+                      <>
+                        <td><input value={editName} onChange={(e) => setEditName(e.target.value)} /></td>
+                        <td><input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} /></td>
+                        <td><input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} /></td>
+                        <td>
+                          <select value={editRole} onChange={(e) => setEditRole(e.target.value as UserRole)}>
+                            <option value="MANAGER">Manager</option>
+                            <option value="SUPERVISOR">Supervisor</option>
+                            <option value="INSTRUCTOR">Instructor</option>
+                          </select>
+                        </td>
+                        <td>
+                          <label style={{ flexDirection: "row", alignItems: "center", gap: 6, fontWeight: 400 }}>
+                            <input
+                              type="checkbox"
+                              checked={editActive}
+                              onChange={(e) => setEditActive(e.target.checked)}
+                              style={{ width: "auto" }}
+                            />
+                            Active
+                          </label>
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <input
+                              type="password"
+                              value={editPassword}
+                              onChange={(e) => setEditPassword(e.target.value)}
+                              minLength={8}
+                              placeholder="New password (optional)"
+                              style={{ minWidth: 180 }}
+                            />
+                            <button type="button" onClick={() => saveEdit(u.id)}>Save</button>
+                            <button type="button" className="btn-add" onClick={cancelEdit}>Cancel</button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td>{u.name}</td>
+                        <td>{u.email}</td>
+                        <td>{u.phone || "-"}</td>
+                        <td>{u.role}</td>
+                        <td>{u.active ? "Yes" : "No"}</td>
+                        <td>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <button type="button" onClick={() => beginEdit(u)}>Edit</button>
+                            <button type="button" className="btn-add" onClick={() => removeUser(u)}>Delete</button>
+                          </div>
+                        </td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -328,75 +548,267 @@ function ManagerUsers({ token, users, onCreated }: { token: string; users: User[
   );
 }
 
-function ManagerLevels({ token, levels, onCreated }: { token: string; levels: Level[]; onCreated: (l: Level) => void }) {
-  const [name, setName] = useState("");
+function ManagerLevels({
+  token,
+  levels,
+  skills,
+  onLevelCreated,
+  onLevelUpdated,
+  onLevelDeleted,
+  onSkillCreated,
+  onSkillUpdated,
+  onSkillDeleted,
+}: {
+  token: string;
+  levels: Level[];
+  skills: Skill[];
+  onLevelCreated: (l: Level) => void;
+  onLevelUpdated: (l: Level) => void;
+  onLevelDeleted: (levelId: number) => void;
+  onSkillCreated: (s: Skill) => void;
+  onSkillUpdated: (s: Skill) => void;
+  onSkillDeleted: (skillId: number) => void;
+}) {
+  const [levelName, setLevelName] = useState("");
+  const [editingLevelId, setEditingLevelId] = useState<number | null>(null);
+  const [editLevelName, setEditLevelName] = useState("");
+  const [editLevelActive, setEditLevelActive] = useState(true);
 
-  async function onSubmit(e: FormEvent) {
+  const [skillName, setSkillName] = useState("");
+  const [skillDescription, setSkillDescription] = useState("");
+  const [skillLevelId, setSkillLevelId] = useState<number>(levels[0]?.id ?? 0);
+  const [editingSkillId, setEditingSkillId] = useState<number | null>(null);
+  const [editSkillName, setEditSkillName] = useState("");
+  const [editSkillDescription, setEditSkillDescription] = useState("");
+  const [editSkillLevelId, setEditSkillLevelId] = useState<number>(levels[0]?.id ?? 0);
+  const [editSkillActive, setEditSkillActive] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!skillLevelId && levels.length > 0) setSkillLevelId(levels[0].id);
+  }, [skillLevelId, levels]);
+
+  async function onCreateLevel(e: FormEvent) {
     e.preventDefault();
-    const level = await createLevel(token, { name, active: true });
-    onCreated(level); setName("");
+    try {
+      setError("");
+      const level = await createLevel(token, { name: levelName, active: true });
+      onLevelCreated(level);
+      setLevelName("");
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  function beginEditLevel(level: Level) {
+    setEditingLevelId(level.id);
+    setEditLevelName(level.name);
+    setEditLevelActive(level.active);
+    setError("");
+  }
+
+  async function saveLevel(levelId: number) {
+    try {
+      setError("");
+      const updated = await updateLevel(token, levelId, { name: editLevelName, active: editLevelActive });
+      onLevelUpdated(updated);
+      setEditingLevelId(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function removeLevel(level: Level) {
+    const confirmed = window.confirm(`Delete level ${level.name}?`);
+    if (!confirmed) return;
+    try {
+      setError("");
+      await deleteLevel(token, level.id);
+      onLevelDeleted(level.id);
+      if (editingLevelId === level.id) setEditingLevelId(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function onCreateSkill(e: FormEvent) {
+    e.preventDefault();
+    try {
+      setError("");
+      const skill = await createSkill(token, {
+        name: skillName,
+        description: skillDescription.trim() || undefined,
+        level_id: skillLevelId,
+        active: true,
+      });
+      onSkillCreated(skill);
+      setSkillName("");
+      setSkillDescription("");
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  function beginEditSkill(skill: Skill) {
+    setEditingSkillId(skill.id);
+    setEditSkillName(skill.name);
+    setEditSkillDescription(skill.description ?? "");
+    setEditSkillLevelId(skill.level_id);
+    setEditSkillActive(skill.active);
+    setError("");
+  }
+
+  async function saveSkill(skillId: number) {
+    try {
+      setError("");
+      const updated = await updateSkill(token, skillId, {
+        name: editSkillName,
+        description: editSkillDescription.trim() || null,
+        level_id: editSkillLevelId,
+        active: editSkillActive,
+      });
+      onSkillUpdated(updated);
+      setEditingSkillId(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function removeSkill(skill: Skill) {
+    const confirmed = window.confirm(`Delete skill ${skill.name}?`);
+    if (!confirmed) return;
+    try {
+      setError("");
+      await deleteSkill(token, skill.id);
+      onSkillDeleted(skill.id);
+      if (editingSkillId === skill.id) setEditingSkillId(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
 
   return (
-    <Section title="Swim Levels">
-      <form className="form inline" onSubmit={onSubmit}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Level 1 — Beginner" required />
+    <Section title="Levels">
+      <form className="form inline" onSubmit={onCreateLevel}>
+        <input
+          value={levelName}
+          onChange={(e) => setLevelName(e.target.value)}
+          placeholder="e.g. Level 1 - Beginner"
+          required
+        />
         <button type="submit">Add Level</button>
       </form>
+
       <table>
-        <thead><tr><th>Level Name</th><th>Status</th></tr></thead>
+        <thead><tr><th>Level Name</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
           {levels.map((l) => (
             <tr key={l.id}>
-              <td>{l.name}</td>
-              <td><span className={l.active ? "badge-submitted" : "badge-draft"}>{l.active ? "Active" : "Inactive"}</span></td>
+              {editingLevelId === l.id ? (
+                <>
+                  <td><input value={editLevelName} onChange={(e) => setEditLevelName(e.target.value)} /></td>
+                  <td>
+                    <label style={{ flexDirection: "row", alignItems: "center", gap: 6, fontWeight: 400 }}>
+                      <input
+                        type="checkbox"
+                        checked={editLevelActive}
+                        onChange={(e) => setEditLevelActive(e.target.checked)}
+                        style={{ width: "auto" }}
+                      />
+                      Active
+                    </label>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button type="button" onClick={() => saveLevel(l.id)}>Save</button>
+                      <button type="button" className="btn-add" onClick={() => setEditingLevelId(null)}>Cancel</button>
+                    </div>
+                  </td>
+                </>
+              ) : (
+                <>
+                  <td>{l.name}</td>
+                  <td>
+                    <span className={l.active ? "badge-submitted" : "badge-draft"}>{l.active ? "Active" : "Inactive"}</span>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button type="button" onClick={() => beginEditLevel(l)}>Edit</button>
+                      <button type="button" className="btn-add" onClick={() => removeLevel(l)}>Delete</button>
+                    </div>
+                  </td>
+                </>
+              )}
             </tr>
           ))}
         </tbody>
       </table>
-    </Section>
-  );
-}
 
-function ManagerSkills({
-  token, levels, skills, onCreated
-}: { token: string; levels: Level[]; skills: Skill[]; onCreated: (s: Skill) => void }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [levelId, setLevelId] = useState<number>(levels[0]?.id ?? 0);
+      <div style={{ marginTop: 20 }}>
+        <p className="chart-section-title">Skills</p>
+        <form className="form inline" onSubmit={onCreateSkill}>
+          <input value={skillName} onChange={(e) => setSkillName(e.target.value)} placeholder="e.g. Freestyle" required />
+          <input value={skillDescription} onChange={(e) => setSkillDescription(e.target.value)} placeholder="Description" />
+          <select value={skillLevelId} onChange={(e) => setSkillLevelId(Number(e.target.value))}>
+            {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+          <button type="submit" disabled={levels.length === 0}>Add Skill</button>
+        </form>
+      </div>
 
-  useEffect(() => {
-    if (!levelId && levels.length > 0) setLevelId(levels[0].id);
-  }, [levelId, levels]);
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    const skill = await createSkill(token, { name, description, level_id: levelId, active: true });
-    onCreated(skill); setName(""); setDescription("");
-  }
-
-  return (
-    <Section title="Strokes & Skills">
-      <form className="form inline" onSubmit={onSubmit}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Freestyle" required />
-        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Description" />
-        <select value={levelId} onChange={(e) => setLevelId(Number(e.target.value))}>
-          {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </select>
-        <button type="submit">Add Skill</button>
-      </form>
       <table>
-        <thead><tr><th>Skill</th><th>Level</th><th>Description</th></tr></thead>
+        <thead><tr><th>Skill</th><th>Level</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
           {skills.map((s) => (
             <tr key={s.id}>
-              <td>{s.name}</td>
-              <td>{levels.find((l) => l.id === s.level_id)?.name ?? s.level_id}</td>
-              <td style={{ color: "#64748b" }}>{s.description ?? "—"}</td>
+              {editingSkillId === s.id ? (
+                <>
+                  <td><input value={editSkillName} onChange={(e) => setEditSkillName(e.target.value)} /></td>
+                  <td>
+                    <select value={editSkillLevelId} onChange={(e) => setEditSkillLevelId(Number(e.target.value))}>
+                      {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </select>
+                  </td>
+                  <td><input value={editSkillDescription} onChange={(e) => setEditSkillDescription(e.target.value)} /></td>
+                  <td>
+                    <label style={{ flexDirection: "row", alignItems: "center", gap: 6, fontWeight: 400 }}>
+                      <input
+                        type="checkbox"
+                        checked={editSkillActive}
+                        onChange={(e) => setEditSkillActive(e.target.checked)}
+                        style={{ width: "auto" }}
+                      />
+                      Active
+                    </label>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button type="button" onClick={() => saveSkill(s.id)}>Save</button>
+                      <button type="button" className="btn-add" onClick={() => setEditingSkillId(null)}>Cancel</button>
+                    </div>
+                  </td>
+                </>
+              ) : (
+                <>
+                  <td>{s.name}</td>
+                  <td>{levels.find((l) => l.id === s.level_id)?.name ?? s.level_id}</td>
+                  <td style={{ color: "#64748b" }}>{s.description ?? "-"}</td>
+                  <td>
+                    <span className={s.active ? "badge-submitted" : "badge-draft"}>{s.active ? "Active" : "Inactive"}</span>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button type="button" onClick={() => beginEditSkill(s)}>Edit</button>
+                      <button type="button" className="btn-add" onClick={() => removeSkill(s)}>Delete</button>
+                    </div>
+                  </td>
+                </>
+              )}
             </tr>
           ))}
         </tbody>
       </table>
+      {error && <p className="error" style={{ marginTop: 10 }}>{error}</p>}
     </Section>
   );
 }
@@ -619,7 +1031,6 @@ function ManagerDashboard({
           <button onClick={() => onGo("users")}>👤 Manage Users</button>
           <button onClick={onConfigureTemplates}>📋 Templates</button>
           <button onClick={() => onGo("levels")}>🌊 Levels</button>
-          <button onClick={() => onGo("skills")}>🏅 Skills</button>
           <button onClick={() => onGo("evaluations")}>📊 All Evaluations</button>
           <button onClick={onExportCsv}>⬇ Export CSV</button>
           <button onClick={() => setShowEmail((p) => !p)}>
@@ -702,3 +1113,6 @@ function ManagerDashboard({
     </>
   );
 }
+
+
+

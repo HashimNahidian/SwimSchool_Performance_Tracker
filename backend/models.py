@@ -46,6 +46,7 @@ class User(Base):
     school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    phone: Mapped[str | None] = mapped_column(String(25))
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
