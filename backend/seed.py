@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 from sqlalchemy import select
@@ -145,7 +145,7 @@ def seed() -> None:
             role=models.UserRole.MANAGER,
             school_id=school.id,
         )
-        supervisor = get_or_create_user(
+        supervisor_1 = get_or_create_user(
             db,
             name="Sam Supervisor",
             email="supervisor@propel.local",
@@ -153,9 +153,17 @@ def seed() -> None:
             role=models.UserRole.SUPERVISOR,
             school_id=school.id,
         )
+        supervisor_2 = get_or_create_user(
+            db,
+            name="Lisa Park",
+            email="supervisor2@propel.local",
+            password="Propel123!",
+            role=models.UserRole.SUPERVISOR,
+            school_id=school.id,
+        )
         instructor_1 = get_or_create_user(
             db,
-            name="Ivy Instructor",
+            name="Sarah Johnson",
             email="instructor1@propel.local",
             password="Propel123!",
             role=models.UserRole.INSTRUCTOR,
@@ -163,95 +171,105 @@ def seed() -> None:
         )
         instructor_2 = get_or_create_user(
             db,
-            name="Ian Instructor",
+            name="Mike Chen",
             email="instructor2@propel.local",
             password="Propel123!",
             role=models.UserRole.INSTRUCTOR,
             school_id=school.id,
         )
+        instructor_3 = get_or_create_user(
+            db,
+            name="Emma Davis",
+            email="instructor3@propel.local",
+            password="Propel123!",
+            role=models.UserRole.INSTRUCTOR,
+            school_id=school.id,
+        )
 
-        beginner = get_or_create_level(db, school.id, "Beginner")
-        intermediate = get_or_create_level(db, school.id, "Intermediate")
+        beginner = get_or_create_level(db, school.id, "Level 1 — Beginner")
+        intermediate = get_or_create_level(db, school.id, "Level 2 — Intermediate")
+        advanced = get_or_create_level(db, school.id, "Level 3 — Advanced")
+        competitive = get_or_create_level(db, school.id, "Level 4 — Competitive")
 
-        freestyle = get_or_create_skill(db, school.id, beginner.id, "Freestyle Basics")
+        freestyle = get_or_create_skill(db, school.id, beginner.id, "Freestyle")
+        water_safety = get_or_create_skill(db, school.id, beginner.id, "Water Safety")
         backstroke = get_or_create_skill(db, school.id, intermediate.id, "Backstroke")
+        breaststroke = get_or_create_skill(db, school.id, intermediate.id, "Breaststroke")
+        butterfly = get_or_create_skill(db, school.id, advanced.id, "Butterfly")
+        turns_starts = get_or_create_skill(db, school.id, advanced.id, "Turns & Starts")
+        race_strategy = get_or_create_skill(db, school.id, competitive.id, "Race Strategy")
+        endurance = get_or_create_skill(db, school.id, competitive.id, "Endurance Training")
 
         attributes = [
             get_or_create_attribute(db, "Water Safety", "Maintains safe pool behavior and awareness."),
             get_or_create_attribute(db, "Stroke Technique", "Demonstrates proper body position and arm path."),
             get_or_create_attribute(db, "Breathing Rhythm", "Coordinates breathing with stroke cycle."),
             get_or_create_attribute(db, "Communication", "Explains cues clearly and constructively."),
+            get_or_create_attribute(db, "Class Management", "Manages group pacing and transitions effectively."),
         ]
+        a_safety, a_stroke, a_breath, a_comm, a_mgmt = attributes
 
-        get_or_create_template(
-            db,
-            name="Beginner Freestyle Template",
-            level_id=beginner.id,
-            skill_id=freestyle.id,
-            school_id=school.id,
-            attribute_ids=[attributes[0].id, attributes[1].id, attributes[2].id],
-        )
-        get_or_create_template(
-            db,
-            name="Intermediate Backstroke Template",
-            level_id=intermediate.id,
-            skill_id=backstroke.id,
-            school_id=school.id,
-            attribute_ids=[attributes[0].id, attributes[1].id, attributes[3].id],
-        )
+        get_or_create_template(db, name="Beginner Freestyle", level_id=beginner.id, skill_id=freestyle.id, school_id=school.id, attribute_ids=[a_safety.id, a_stroke.id, a_breath.id, a_comm.id])
+        get_or_create_template(db, name="Beginner Water Safety", level_id=beginner.id, skill_id=water_safety.id, school_id=school.id, attribute_ids=[a_safety.id, a_comm.id, a_mgmt.id])
+        get_or_create_template(db, name="Intermediate Backstroke", level_id=intermediate.id, skill_id=backstroke.id, school_id=school.id, attribute_ids=[a_stroke.id, a_breath.id, a_comm.id])
+        get_or_create_template(db, name="Intermediate Breaststroke", level_id=intermediate.id, skill_id=breaststroke.id, school_id=school.id, attribute_ids=[a_stroke.id, a_breath.id, a_comm.id])
+        get_or_create_template(db, name="Advanced Butterfly", level_id=advanced.id, skill_id=butterfly.id, school_id=school.id, attribute_ids=[a_stroke.id, a_breath.id, a_comm.id, a_mgmt.id])
+        get_or_create_template(db, name="Advanced Turns & Starts", level_id=advanced.id, skill_id=turns_starts.id, school_id=school.id, attribute_ids=[a_stroke.id, a_comm.id, a_mgmt.id])
+        get_or_create_template(db, name="Competitive Race Strategy", level_id=competitive.id, skill_id=race_strategy.id, school_id=school.id, attribute_ids=[a_stroke.id, a_comm.id, a_mgmt.id])
+        get_or_create_template(db, name="Competitive Endurance", level_id=competitive.id, skill_id=endurance.id, school_id=school.id, attribute_ids=[a_safety.id, a_stroke.id, a_breath.id, a_mgmt.id])
 
-        existing_eval = db.scalar(
-            select(models.Evaluation).where(
-                models.Evaluation.instructor_id == instructor_1.id,
-                models.Evaluation.supervisor_id == supervisor.id,
-                models.Evaluation.session_label == "Seed Session 1",
+        today = date.today()
+
+        def days_ago(n: int) -> date:
+            return today - timedelta(days=n)
+
+        def make_eval(db, *, instructor, supervisor, level, skill, label, days, ratings_map, notes=""):
+            existing = db.scalar(
+                select(models.Evaluation).where(
+                    models.Evaluation.instructor_id == instructor.id,
+                    models.Evaluation.supervisor_id == supervisor.id,
+                    models.Evaluation.session_label == label,
+                )
             )
-        )
-        if not existing_eval:
-            evaluation = models.Evaluation(
+            if existing:
+                return
+            ev = models.Evaluation(
                 school_id=school.id,
-                instructor_id=instructor_1.id,
+                instructor_id=instructor.id,
                 supervisor_id=supervisor.id,
-                level_id=beginner.id,
-                skill_id=freestyle.id,
-                session_label="Seed Session 1",
-                session_date=date.today(),
-                notes="Solid class delivery with clear corrections.",
+                level_id=level.id,
+                skill_id=skill.id,
+                session_label=label,
+                session_date=days_ago(days),
+                notes=notes,
                 status=models.EvaluationStatus.SUBMITTED,
-                submitted_at=datetime.now(timezone.utc),
+                submitted_at=datetime.now(timezone.utc) - timedelta(days=days),
             )
-            evaluation.ratings = [
-                models.EvaluationRating(attribute_id=attributes[0].id, rating_value=3),
-                models.EvaluationRating(attribute_id=attributes[1].id, rating_value=2),
-                models.EvaluationRating(attribute_id=attributes[2].id, rating_value=2),
-            ]
-            db.add(evaluation)
+            ev.ratings = [models.EvaluationRating(attribute_id=attr_id, rating_value=val) for attr_id, val in ratings_map.items()]
+            db.add(ev)
 
-        existing_draft = db.scalar(
-            select(models.Evaluation).where(
-                models.Evaluation.instructor_id == instructor_2.id,
-                models.Evaluation.supervisor_id == supervisor.id,
-                models.Evaluation.session_label == "Seed Draft",
-            )
-        )
-        if not existing_draft:
-            draft = models.Evaluation(
-                school_id=school.id,
-                instructor_id=instructor_2.id,
-                supervisor_id=supervisor.id,
-                level_id=intermediate.id,
-                skill_id=backstroke.id,
-                session_label="Seed Draft",
-                session_date=date.today(),
-                notes="Draft for supervisor workflow testing.",
-                status=models.EvaluationStatus.DRAFT,
-            )
-            draft.ratings = [
-                models.EvaluationRating(attribute_id=attributes[0].id, rating_value=2),
-                models.EvaluationRating(attribute_id=attributes[1].id, rating_value=2),
-                models.EvaluationRating(attribute_id=attributes[3].id, rating_value=1),
-            ]
-            db.add(draft)
+        # Sarah Johnson evaluations
+        make_eval(db, instructor=instructor_1, supervisor=supervisor_1, level=beginner, skill=freestyle, label="Morning Lanes A", days=63, ratings_map={a_safety.id: 3, a_stroke.id: 2, a_breath.id: 2, a_comm.id: 3}, notes="Strong opener, good corrections.")
+        make_eval(db, instructor=instructor_1, supervisor=supervisor_1, level=intermediate, skill=backstroke, label="Afternoon Session B", days=56, ratings_map={a_stroke.id: 2, a_breath.id: 3, a_comm.id: 2}, notes="Timing drills need more work.")
+        make_eval(db, instructor=instructor_1, supervisor=supervisor_2, level=beginner, skill=water_safety, label="Safety Review", days=49, ratings_map={a_safety.id: 3, a_comm.id: 3, a_mgmt.id: 2})
+        make_eval(db, instructor=instructor_1, supervisor=supervisor_1, level=advanced, skill=butterfly, label="Advanced Class", days=35, ratings_map={a_stroke.id: 2, a_breath.id: 2, a_comm.id: 3, a_mgmt.id: 2})
+        make_eval(db, instructor=instructor_1, supervisor=supervisor_2, level=intermediate, skill=breaststroke, label="Breaststroke Clinic", days=21, ratings_map={a_stroke.id: 3, a_breath.id: 3, a_comm.id: 3})
+        make_eval(db, instructor=instructor_1, supervisor=supervisor_1, level=advanced, skill=turns_starts, label="Technique Block", days=7, ratings_map={a_stroke.id: 2, a_comm.id: 2, a_mgmt.id: 3})
+
+        # Mike Chen evaluations
+        make_eval(db, instructor=instructor_2, supervisor=supervisor_1, level=competitive, skill=race_strategy, label="Competition Prep", days=61, ratings_map={a_stroke.id: 3, a_comm.id: 3, a_mgmt.id: 3}, notes="Excellent race strategy delivery.")
+        make_eval(db, instructor=instructor_2, supervisor=supervisor_2, level=advanced, skill=turns_starts, label="Technique Session", days=54, ratings_map={a_stroke.id: 2, a_comm.id: 2, a_mgmt.id: 2})
+        make_eval(db, instructor=instructor_2, supervisor=supervisor_1, level=competitive, skill=endurance, label="Endurance Block", days=34, ratings_map={a_safety.id: 3, a_stroke.id: 3, a_breath.id: 2, a_mgmt.id: 3})
+        make_eval(db, instructor=instructor_2, supervisor=supervisor_2, level=intermediate, skill=backstroke, label="Backstroke Workshop", days=20, ratings_map={a_stroke.id: 2, a_breath.id: 2, a_comm.id: 3})
+        make_eval(db, instructor=instructor_2, supervisor=supervisor_1, level=competitive, skill=race_strategy, label="Sprint Drills", days=8, ratings_map={a_stroke.id: 3, a_comm.id: 3, a_mgmt.id: 2})
+
+        # Emma Davis evaluations
+        make_eval(db, instructor=instructor_3, supervisor=supervisor_2, level=beginner, skill=freestyle, label="Beginner Intro", days=64, ratings_map={a_safety.id: 2, a_stroke.id: 2, a_breath.id: 2, a_comm.id: 2}, notes="First session, room to grow.")
+        make_eval(db, instructor=instructor_3, supervisor=supervisor_1, level=beginner, skill=water_safety, label="Water Safety 101", days=57, ratings_map={a_safety.id: 3, a_comm.id: 3, a_mgmt.id: 3})
+        make_eval(db, instructor=instructor_3, supervisor=supervisor_2, level=intermediate, skill=breaststroke, label="Stroke Refinement", days=43, ratings_map={a_stroke.id: 3, a_breath.id: 2, a_comm.id: 3})
+        make_eval(db, instructor=instructor_3, supervisor=supervisor_1, level=intermediate, skill=backstroke, label="Backstroke Basics", days=30, ratings_map={a_stroke.id: 2, a_breath.id: 2, a_comm.id: 2})
+        make_eval(db, instructor=instructor_3, supervisor=supervisor_2, level=advanced, skill=butterfly, label="Butterfly Workshop", days=16, ratings_map={a_stroke.id: 3, a_breath.id: 3, a_comm.id: 3, a_mgmt.id: 3}, notes="Excellent session.")
+        make_eval(db, instructor=instructor_3, supervisor=supervisor_1, level=beginner, skill=freestyle, label="Splash & Learn", days=7, ratings_map={a_safety.id: 3, a_stroke.id: 3, a_breath.id: 2, a_comm.id: 3})
 
         db.add(
             models.AuditLog(
@@ -266,12 +284,13 @@ def seed() -> None:
         db.commit()
 
     print("Seed complete.")
-    print("Login emails:")
-    print("- manager@propel.local")
-    print("- supervisor@propel.local")
-    print("- instructor1@propel.local")
-    print("- instructor2@propel.local")
-    print("Seed password for all users: Propel123!")
+    print("Login credentials (password: Propel123!):")
+    print("- manager@propel.local  (Manager)")
+    print("- supervisor@propel.local  (Supervisor — Sam Supervisor)")
+    print("- supervisor2@propel.local  (Supervisor — Lisa Park)")
+    print("- instructor1@propel.local  (Instructor — Sarah Johnson)")
+    print("- instructor2@propel.local  (Instructor — Mike Chen)")
+    print("- instructor3@propel.local  (Instructor — Emma Davis)")
 
 
 if __name__ == "__main__":
