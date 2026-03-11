@@ -23,7 +23,6 @@ import {
 import type { EvaluationDetail, EvaluationSummary, Level, Skill, User, UserRole } from "../types";
 import { Section } from "../components/Section";
 import { EvaluationTable } from "../components/EvaluationTable";
-import { DonutChart } from "../components/DonutChart";
 import { BarChart } from "../components/BarChart";
 import { EvaluationReportModal } from "../components/EvaluationReport";
 import { EvaluationEditModal } from "../components/EvaluationEditModal";
@@ -971,21 +970,14 @@ function ManagerDashboard({
         )}
       </div>
 
-      {/* Charts: status donut + monthly trend */}
-      <div className="two-col">
-        <div className="card">
-          <h2>Status Distribution</h2>
-          <DonutChart submitted={submitted} total={total} />
-        </div>
-
-        <div className="card">
-          <h2>Monthly Volume</h2>
-          {monthlyData.length > 0 ? (
-            <BarChart data={monthlyData} labelWidth={80} />
-          ) : (
-            <p style={{ color: "#64748b", fontSize: 14 }}>No session data yet.</p>
-          )}
-        </div>
+      {/* Monthly trend */}
+      <div className="card">
+        <h2>Monthly Volume</h2>
+        {monthlyData.length > 0 ? (
+          <BarChart data={monthlyData} labelWidth={80} />
+        ) : (
+          <p style={{ color: "#64748b", fontSize: 14 }}>No session data yet.</p>
+        )}
       </div>
 
       {/* Charts: instructor performance + skill breakdown */}
