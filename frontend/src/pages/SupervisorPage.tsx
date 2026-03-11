@@ -13,7 +13,7 @@ import type { EvaluationDetail, EvaluationSummary, Level, Skill, TemplateResolve
 import { EvaluationTable } from "../components/EvaluationTable";
 import { EvaluationReportModal } from "../components/EvaluationReport";
 import { EvaluationEditModal } from "../components/EvaluationEditModal";
-import { DEMO_EVALUATIONS } from "../mockData";
+import { DEMO_EVALUATIONS, DEMO_LEVELS, DEMO_SKILLS, DEMO_USERS } from "../mockData";
 
 export function SupervisorPage() {
   const { token, user } = useAuth();
@@ -46,6 +46,9 @@ export function SupervisorPage() {
       })
       .catch((e: Error) => {
         setError(e.message);
+        setUsers(DEMO_USERS.filter((x) => x.role === "INSTRUCTOR"));
+        setLevels(DEMO_LEVELS);
+        setSkills(DEMO_SKILLS);
         setEvaluations(DEMO_EVALUATIONS.filter((ev) => ev.supervisor_id === 201));
         setIsDemo(true);
       });
