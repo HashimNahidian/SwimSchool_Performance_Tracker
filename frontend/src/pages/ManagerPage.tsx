@@ -4,7 +4,6 @@ import type { ManagerEvaluationQuery } from "../api";
 import {
   createLevel,
   createSkill,
-  createTemplate,
   createUser,
   deleteLevel,
   deleteSkill,
@@ -12,18 +11,15 @@ import {
   emailEvaluationsCsv,
   exportEvaluationsCsvUrl,
   getManagerEvaluationDetail,
-  listAttributes,
   listLevels,
   listManagerEvaluationsWithQuery,
   listSkills,
-  listTemplates,
   listUsers,
   updateLevel,
   updateSkill,
   updateUser,
-  updateTemplate
 } from "../api";
-import type { Attribute, EvaluationDetail, EvaluationSummary, Level, Skill, TemplateConfig, User, UserRole } from "../types";
+import type { EvaluationDetail, EvaluationSummary, Level, Skill, User, UserRole } from "../types";
 import { Section } from "../components/Section";
 import { EvaluationTable } from "../components/EvaluationTable";
 import { DonutChart } from "../components/DonutChart";
@@ -31,9 +27,9 @@ import { BarChart } from "../components/BarChart";
 import { EvaluationReportModal } from "../components/EvaluationReport";
 import { DEMO_EVALUATIONS, DEMO_LEVELS, DEMO_SKILLS, DEMO_USERS } from "../mockData";
 
-type ManagerTab = "dashboard" | "users" | "levels" | "templates" | "evaluations";
+type ManagerTab = "dashboard" | "users" | "levels" | "evaluations";
 
-const MANAGER_TABS: ManagerTab[] = ["dashboard", "users", "levels", "templates", "evaluations"];
+const MANAGER_TABS: ManagerTab[] = ["dashboard", "users", "levels", "evaluations"];
 
 const SORT_FIELDS = new Set<NonNullable<ManagerEvaluationQuery["sort_by"]>>([
   "id", "session_date", "submitted_at", "instructor_id", "supervisor_id", "level_id", "skill_id"
@@ -60,7 +56,6 @@ function buildQuery(filters: Record<string, string>): ManagerEvaluationQuery {
   if (ratingValue !== undefined) q.rating_value = ratingValue;
   if (filters.date_from) q.date_from = filters.date_from;
   if (filters.date_to) q.date_to = filters.date_to;
-  if (filters.status === "DRAFT" || filters.status === "SUBMITTED") q.status = filters.status;
   q.sort_by = SORT_FIELDS.has(filters.sort_by as NonNullable<ManagerEvaluationQuery["sort_by"]>)
     ? (filters.sort_by as NonNullable<ManagerEvaluationQuery["sort_by"]>)
     : "submitted_at";
@@ -75,15 +70,13 @@ export function ManagerPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [attributes, setAttributes] = useState<Attribute[]>([]);
-  const [templates, setTemplates] = useState<TemplateConfig[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
   const [isDemo, setIsDemo] = useState(false);
   const [reportEval, setReportEval] = useState<EvaluationDetail | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [filters, setFilters] = useState({
     instructor_id: "", supervisor_id: "", level_id: "", skill_id: "",
-    rating_value: "", date_from: "", date_to: "", status: "",
+    rating_value: "", date_from: "", date_to: "",
     sort_by: "submitted_at", sort_dir: "desc"
   });
   const [appliedQuery, setAppliedQuery] = useState<ManagerEvaluationQuery>({
@@ -95,15 +88,12 @@ export function ManagerPage() {
     if (!token) return;
     Promise.all([
       listUsers(token), listLevels(token), listSkills(token),
-      listAttributes(token), listTemplates(token),
       listManagerEvaluationsWithQuery(token, appliedQuery)
     ])
-      .then(([u, l, s, a, t, e]) => {
+      .then(([u, l, s, e]) => {
         setUsers(u.length > 0 ? u : DEMO_USERS);
         setLevels(l.length > 0 ? l : DEMO_LEVELS);
         setSkills(s.length > 0 ? s : DEMO_SKILLS);
-        setAttributes(a);
-        setTemplates(t);
         if (e.length === 0) {
           setEvaluations(DEMO_EVALUATIONS);
           setIsDemo(true);
@@ -176,7 +166,6 @@ export function ManagerPage() {
             {item === "dashboard" ? "🏊 Dashboard" :
              item === "users" ? "👤 Users" :
              item === "levels" ? "🌊 Levels" :
-             item === "templates" ? "📋 Templates" :
              "📊 Evaluations"}
           </button>
         ))}
@@ -186,7 +175,6 @@ export function ManagerPage() {
         <ManagerDashboard
           rows={evaluations}
           onGo={setTab}
-          onConfigureTemplates={() => setTab("templates")}
           onExportCsv={downloadCsv}
           onEmailCsv={sendCsvEmail}
           appliedManagerQuery={appliedQuery}
@@ -218,13 +206,6 @@ export function ManagerPage() {
           onSkillDeleted={(skillId) => setSkills((p) => p.filter((item) => item.id !== skillId))}
         />
       )}
-      {tab === "templates" && (
-        <ManagerTemplates
-          token={token} levels={levels} skills={skills} attributes={attributes} templates={templates}
-          onCreated={(t) => setTemplates((p) => [...p, t])}
-          onUpdated={(t) => setTemplates((p) => p.map((item) => (item.id === t.id ? t : item)))}
-        />
-      )}
       {tab === "evaluations" && (
         <Section title={`All Evaluations${loadingReport ? " — Loading report…" : ""}`}>
           <form className="form inline" onSubmit={(e) => { e.preventDefault(); setEvaluationsPage(0); setAppliedQuery({ ...buildQuery(filters), limit: EVALUATIONS_PAGE_SIZE, offset: 0 }); }}>
@@ -248,12 +229,6 @@ export function ManagerPage() {
               <option value="1">1 — Remediate</option>
               <option value="2">2 — Meets</option>
               <option value="3">3 — Exceeds</option>
-            </select>
-            <select value={filters.status}
-              onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value }))}>
-              <option value="">all statuses</option>
-              <option value="DRAFT">Draft</option>
-              <option value="SUBMITTED">Submitted</option>
             </select>
             <select value={filters.sort_by}
               onChange={(e) => setFilters((p) => ({ ...p, sort_by: e.target.value }))}>
@@ -813,100 +788,6 @@ function ManagerLevels({
   );
 }
 
-function ManagerTemplates({
-  token, levels, skills, attributes, templates, onCreated, onUpdated
-}: {
-  token: string; levels: Level[]; skills: Skill[]; attributes: Attribute[];
-  templates: TemplateConfig[];
-  onCreated: (t: TemplateConfig) => void;
-  onUpdated: (t: TemplateConfig) => void;
-}) {
-  const [name, setName] = useState("");
-  const [levelId, setLevelId] = useState<number>(levels[0]?.id ?? 0);
-  const [skillId, setSkillId] = useState<number>(0);
-  const [selected, setSelected] = useState<Record<number, number>>({});
-  const [createError, setCreateError] = useState("");
-  const levelSkills = useMemo(() => skills.filter((x) => x.level_id === levelId), [skills, levelId]);
-  const levelMap = useMemo(() => new Map(levels.map((l) => [l.id, l.name])), [levels]);
-  const skillMap = useMemo(() => new Map(skills.map((s) => [s.id, s.name])), [skills]);
-
-  useEffect(() => { if (!levelId && levels.length > 0) setLevelId(levels[0].id); }, [levelId, levels]);
-  useEffect(() => { if (levelSkills.length > 0) setSkillId(levelSkills[0].id); }, [levelSkills]);
-
-  function toggleAttribute(id: number, checked: boolean) {
-    setSelected((prev) => {
-      if (!checked) { const n = { ...prev }; delete n[id]; return n; }
-      const max = Object.values(prev).reduce((m, v) => (v > m ? v : m), 0);
-      return { ...prev, [id]: max + 1 };
-    });
-  }
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    const attrs = Object.entries(selected)
-      .map(([id, order]) => ({ attribute_id: Number(id), sort_order: order }))
-      .sort((a, b) => a.sort_order - b.sort_order);
-    if (!name.trim()) { setCreateError("Template name is required."); return; }
-    if (!levelId || !skillId) { setCreateError("Level and skill are required."); return; }
-    if (attrs.length === 0) { setCreateError("Select at least one criterion."); return; }
-    setCreateError("");
-    const t = await createTemplate(token, { name: name.trim(), level_id: levelId, skill_id: skillId, active: true, attributes: attrs });
-    onCreated(t); setName(""); setSelected({});
-  }
-
-  return (
-    <Section title="Evaluation Templates">
-      <form className="form" onSubmit={onSubmit}>
-        <div className="form inline">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Template name" required />
-          <select value={levelId} onChange={(e) => setLevelId(Number(e.target.value))}>
-            {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-          <select value={skillId} onChange={(e) => setSkillId(Number(e.target.value))}>
-            {levelSkills.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        </div>
-        <div className="form">
-          {attributes.map((attr) => {
-            const checked = selected[attr.id] !== undefined;
-            return (
-              <label key={attr.id} className="inline-rating">
-                <input type="checkbox" checked={checked}
-                  onChange={(e) => toggleAttribute(attr.id, e.target.checked)} />
-                <span>{attr.name}</span>
-                <input type="number" min={1} disabled={!checked}
-                  value={checked ? selected[attr.id] : ""}
-                  onChange={(e) => setSelected((p) => ({ ...p, [attr.id]: Number.parseInt(e.target.value || "1", 10) }))}
-                  style={{ width: 90 }} />
-              </label>
-            );
-          })}
-        </div>
-        <button type="submit">Create Template</button>
-        {createError && <p className="error">{createError}</p>}
-      </form>
-      <table>
-        <thead><tr><th>Name</th><th>Level</th><th>Skill</th><th>Criteria</th><th>Active</th><th>Action</th></tr></thead>
-        <tbody>
-          {templates.map((t) => (
-            <tr key={t.id}>
-              <td>{t.name}</td>
-              <td>{levelMap.get(t.level_id ?? 0) ?? "—"}</td>
-              <td>{skillMap.get(t.skill_id ?? 0) ?? "—"}</td>
-              <td>{t.attributes.length}</td>
-              <td><span className={t.active ? "badge-submitted" : "badge-draft"}>{t.active ? "Active" : "Inactive"}</span></td>
-              <td>
-                <button onClick={async () => { const u = await updateTemplate(token, t.id, { active: !t.active }); onUpdated(u); }}>
-                  {t.active ? "Deactivate" : "Activate"}
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Section>
-  );
-}
 
 function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
@@ -922,24 +803,23 @@ function monthLabel(dateStr: string) {
 }
 
 function ManagerDashboard({
-  rows, onGo, onConfigureTemplates, onExportCsv, onEmailCsv, appliedManagerQuery, onView
+  rows, onGo, onExportCsv, onEmailCsv, appliedManagerQuery, onView
 }: {
   rows: EvaluationSummary[];
   onGo: (tab: ManagerTab) => void;
-  onConfigureTemplates: () => void;
   onExportCsv: () => void;
   onEmailCsv: (payload: { to: string[]; subject?: string; message?: string; filters?: ManagerEvaluationQuery }) => Promise<void>;
   appliedManagerQuery: ManagerEvaluationQuery;
   onView?: (id: number) => void;
 }) {
-  const { total, draft, submitted, recent7d, recent } = useMemo(() => {
+  const { total, submitted, recent7d, recent } = useMemo(() => {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    let draft = 0, submitted = 0, recent7d = 0;
+    let submitted = 0, recent7d = 0;
     for (const r of rows) {
-      if (r.status === "DRAFT") draft++; else submitted++;
+      if (r.status === "SUBMITTED") submitted++;
       if (r.session_date && new Date(r.session_date) >= weekAgo) recent7d++;
     }
-    return { total: rows.length, draft, submitted, recent7d, recent: rows.slice(0, 8) };
+    return { total: rows.length, submitted, recent7d, recent: rows.slice(0, 8) };
   }, [rows]);
 
   // Instructor performance chart
@@ -1012,24 +892,13 @@ function ManagerDashboard({
       <div className="stat-cards">
         <StatCard label="Total Evaluations" value={total} color="#023e8a" />
         <StatCard label="Submitted" value={submitted} color="#0077b6" />
-        <StatCard label="Pending / Draft" value={draft} color="#f59e0b" />
         <StatCard label="Sessions This Week" value={recent7d} color="#0f9b8e" />
       </div>
-
-      {draft > 0 && (
-        <div className="key-insight">
-          <span className="key-insight-icon">🏊</span>
-          <span className="key-insight-text">
-            <strong>{draft}</strong> evaluation{draft !== 1 ? "s" : ""} awaiting submission.
-          </span>
-        </div>
-      )}
 
       {/* Quick actions */}
       <div className="card" style={{ padding: "16px 24px" }}>
         <div className="dash-actions">
           <button onClick={() => onGo("users")}>👤 Manage Users</button>
-          <button onClick={onConfigureTemplates}>📋 Templates</button>
           <button onClick={() => onGo("levels")}>🌊 Levels</button>
           <button onClick={() => onGo("evaluations")}>📊 All Evaluations</button>
           <button onClick={onExportCsv}>⬇ Export CSV</button>
@@ -1065,7 +934,7 @@ function ManagerDashboard({
       <div className="two-col">
         <div className="card">
           <h2>Status Distribution</h2>
-          <DonutChart submitted={submitted} draft={draft} total={total} />
+          <DonutChart submitted={submitted} total={total} />
         </div>
 
         <div className="card">

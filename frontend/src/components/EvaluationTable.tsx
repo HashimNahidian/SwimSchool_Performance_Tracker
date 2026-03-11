@@ -22,7 +22,6 @@ export function EvaluationTable({
           <th>Skill</th>
           <th>Session</th>
           <th>Date</th>
-          <th>Status</th>
           {hasActions && <th>Actions</th>}
         </tr>
       </thead>
@@ -36,11 +35,6 @@ export function EvaluationTable({
             <td>{row.skill_name}</td>
             <td>{row.session_label}</td>
             <td>{row.session_date}</td>
-            <td>
-              <span className={row.status === "SUBMITTED" ? "badge-submitted" : "badge-draft"}>
-                {row.status === "SUBMITTED" ? "Submitted" : "Draft"}
-              </span>
-            </td>
             {hasActions && (
               <td>
                 <div style={{ display: "flex", gap: 6 }}>
@@ -49,7 +43,7 @@ export function EvaluationTable({
                       📄 View
                     </button>
                   )}
-                  {onEdit && row.status === "DRAFT" && (
+                  {onEdit && (
                     <button
                       style={{ padding: "4px 10px", fontSize: 12, background: "#0096c7" }}
                       onClick={() => onEdit(row.id)}

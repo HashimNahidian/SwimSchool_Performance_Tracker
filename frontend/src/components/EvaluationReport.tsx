@@ -23,11 +23,6 @@ function ReportContent({ ev }: { ev: EvaluationDetail }) {
           <h1 className="report-school">PROPEL SWIM SCHOOL</h1>
           <h2 className="report-title">Instructor Evaluation Report</h2>
         </div>
-        <div className="report-status-chip">
-          <span className={ev.status === "SUBMITTED" ? "badge-submitted" : "badge-draft"}>
-            {ev.status === "SUBMITTED" ? "Submitted" : "Draft"}
-          </span>
-        </div>
       </div>
 
       <hr className="lane-divider" />

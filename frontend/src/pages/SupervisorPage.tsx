@@ -109,17 +109,12 @@ export function SupervisorPage() {
     setEditEval(null);
   }
 
-  const { drafts, instructorCount, total } = useMemo(() => {
-    const draftRows: EvaluationSummary[] = [];
+  const { instructorCount, total } = useMemo(() => {
     const instructors = new Set<string>();
-
     for (const r of evaluations) {
       instructors.add(r.instructor_name);
-      if (r.status === "DRAFT") draftRows.push(r);
     }
-
     return {
-      drafts: draftRows,
       instructorCount: instructors.size,
       total: evaluations.length,
     };
@@ -163,14 +158,6 @@ export function SupervisorPage() {
         </div>
       </div>
 
-      {drafts.length > 0 && (
-        <div className="key-insight">
-          <span className="key-insight-text">
-            You have <strong>{drafts.length}</strong> draft evaluation{drafts.length !== 1 ? "s" : ""} ready for review.
-            Click <strong>Edit</strong> on any draft to finalize ratings and submit.
-          </span>
-        </div>
-      )}
 
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
