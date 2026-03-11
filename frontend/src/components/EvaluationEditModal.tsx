@@ -14,12 +14,16 @@ export function EvaluationEditModal({
   onSaved,
   onSubmitted,
   onClose,
+  updateFn = updateSupervisorEvaluation,
+  showSubmit = true,
 }: {
   token: string;
   evaluation: EvaluationDetail;
   onSaved: (updated: EvaluationDetail) => void;
   onSubmitted: (updated: EvaluationDetail) => void;
   onClose: () => void;
+  updateFn?: (token: string, id: number, payload: { notes?: string | null; ratings?: Array<{ attribute_id: number; rating_value: number }> }) => Promise<EvaluationDetail>;
+  showSubmit?: boolean;
 }) {
   const [notes, setNotes] = useState(evaluation.notes ?? "");
   const [ratings, setRatings] = useState<Record<number, number>>(
@@ -35,7 +39,7 @@ export function EvaluationEditModal({
     setSaving(true);
     setError("");
     try {
-      const updated = await updateSupervisorEvaluation(token, evaluation.id, {
+      const updated = await updateFn(token, evaluation.id, {
         notes: notes.trim() || null,
         ratings: Object.entries(ratings).map(([id, value]) => ({
           attribute_id: Number(id),
@@ -54,7 +58,7 @@ export function EvaluationEditModal({
     setSubmitting(true);
     setError("");
     try {
-      await updateSupervisorEvaluation(token, evaluation.id, {
+      await updateFn(token, evaluation.id, {
         notes: notes.trim() || null,
         ratings: Object.entries(ratings).map(([id, value]) => ({
           attribute_id: Number(id),
@@ -146,38 +150,40 @@ export function EvaluationEditModal({
 
             <div className="edit-modal-actions">
               <button type="submit" disabled={saving}>
-                {saving ? "Saving..." : "Save Draft"}
+                {saving ? "Saving..." : "Save Changes"}
               </button>
 
-              {!confirmSubmit ? (
-                <button
-                  type="button"
-                  style={{ background: "#0f9b8e" }}
-                  onClick={() => setConfirmSubmit(true)}
-                >
-                  Submit Evaluation
-                </button>
-              ) : (
-                <div className="edit-modal-confirm-row">
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "#023e8a" }}>
-                    Submit and lock this evaluation?
-                  </span>
+              {showSubmit && (
+                !confirmSubmit ? (
                   <button
                     type="button"
                     style={{ background: "#0f9b8e" }}
-                    disabled={submitting}
-                    onClick={handleSubmit}
+                    onClick={() => setConfirmSubmit(true)}
                   >
-                    {submitting ? "Submitting..." : "Confirm Submit"}
+                    Submit Evaluation
                   </button>
-                  <button
-                    type="button"
-                    className="btn-add"
-                    onClick={() => setConfirmSubmit(false)}
-                  >
-                    Cancel
-                  </button>
-                </div>
+                ) : (
+                  <div className="edit-modal-confirm-row">
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#023e8a" }}>
+                      Submit and lock this evaluation?
+                    </span>
+                    <button
+                      type="button"
+                      style={{ background: "#0f9b8e" }}
+                      disabled={submitting}
+                      onClick={handleSubmit}
+                    >
+                      {submitting ? "Submitting..." : "Confirm Submit"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-add"
+                      onClick={() => setConfirmSubmit(false)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )
               )}
             </div>
           </form>

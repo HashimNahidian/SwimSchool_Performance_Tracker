@@ -287,3 +287,11 @@ export function submitSupervisorEvaluation(token: string, id: number): Promise<E
 export function getManagerEvaluationDetail(token: string, id: number): Promise<EvaluationDetail> {
   return request(`/manager/evaluations/${id}`, "GET", undefined, token);
 }
+
+export function updateManagerEvaluation(
+  token: string,
+  id: number,
+  payload: { notes?: string | null; ratings?: Array<{ attribute_id: number; rating_value: number }> }
+): Promise<EvaluationDetail> {
+  return request(`/manager/evaluations/${id}`, "PUT", payload, token);
+}

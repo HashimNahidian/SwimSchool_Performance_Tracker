@@ -27,6 +27,7 @@ from schemas import (
     AttributeOut,
     EvaluationDetailOut,
     EvaluationSummaryOut,
+    EvaluationUpdate,
     LevelBase,
     LevelOut,
     LevelUpdate,
@@ -47,6 +48,7 @@ from services import (
     evaluation_query_with_joins,
     evaluation_summary_row,
     evaluations_to_csv,
+    sync_ratings,
     template_attributes_replace,
     template_out,
 )
@@ -464,6 +466,33 @@ def get_evaluation(
     if not evaluation:
         raise HTTPException(status_code=404, detail="Evaluation not found")
     return evaluation_detail_row(evaluation)
+
+
+@router.put("/evaluations/{evaluation_id}", response_model=EvaluationDetailOut, dependencies=[manager_guard])
+def update_evaluation(
+    evaluation_id: int,
+    payload: EvaluationUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> EvaluationDetailOut:
+    evaluation = db.scalar(
+        select(Evaluation).where(
+            Evaluation.id == evaluation_id,
+            Evaluation.school_id == current_user.school_id,
+        )
+    )
+    if not evaluation:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+
+    evaluation.notes = payload.notes
+    if payload.ratings is not None:
+        sync_ratings(db, evaluation, [(r.attribute_id, r.rating_value) for r in payload.ratings])
+    db.commit()
+
+    full = db.scalar(evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation.id))
+    if not full:
+        raise HTTPException(status_code=500, detail="Failed to reload evaluation")
+    return evaluation_detail_row(full)
 
 
 @router.get("/evaluations", response_model=list[EvaluationSummaryOut], dependencies=[manager_guard])

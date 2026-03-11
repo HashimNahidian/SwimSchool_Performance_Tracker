@@ -16,6 +16,7 @@ import {
   listSkills,
   listUsers,
   updateLevel,
+  updateManagerEvaluation,
   updateSkill,
   updateUser,
 } from "../api";
@@ -25,6 +26,7 @@ import { EvaluationTable } from "../components/EvaluationTable";
 import { DonutChart } from "../components/DonutChart";
 import { BarChart } from "../components/BarChart";
 import { EvaluationReportModal } from "../components/EvaluationReport";
+import { EvaluationEditModal } from "../components/EvaluationEditModal";
 import { DEMO_EVALUATIONS, DEMO_LEVELS, DEMO_SKILLS, DEMO_USERS } from "../mockData";
 
 type ManagerTab = "dashboard" | "users" | "levels" | "evaluations";
@@ -73,6 +75,7 @@ export function ManagerPage() {
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
   const [isDemo, setIsDemo] = useState(false);
   const [reportEval, setReportEval] = useState<EvaluationDetail | null>(null);
+  const [editEval, setEditEval] = useState<EvaluationDetail | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [filters, setFilters] = useState({
     instructor_id: "", supervisor_id: "", level_id: "", skill_id: "",
@@ -147,6 +150,27 @@ export function ManagerPage() {
     }
   }
 
+  async function handleEditEval(id: number) {
+    if (isDemo) {
+      const found = DEMO_EVALUATIONS.find((e) => e.id === id);
+      if (found) setEditEval({ ...found, notes: "Demo evaluation.", ratings: [
+        { attribute_id: 1, attribute_name: "Water Safety", rating_value: 2 },
+        { attribute_id: 2, attribute_name: "Stroke Technique", rating_value: 2 },
+      ]});
+      return;
+    }
+    if (!token) return;
+    setLoadingReport(true);
+    try {
+      const detail = await getManagerEvaluationDetail(token, id);
+      setEditEval(detail);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoadingReport(false);
+    }
+  }
+
   if (!token) return null;
 
   return (
@@ -179,6 +203,7 @@ export function ManagerPage() {
           onEmailCsv={sendCsvEmail}
           appliedManagerQuery={appliedQuery}
           onView={handleViewReport}
+          onEdit={handleEditEval}
         />
       )}
       {tab === "users" && (
@@ -285,7 +310,7 @@ export function ManagerPage() {
             onClick={(e) => { if (!token) return; e.preventDefault(); downloadCsv(); }}>
             Export CSV
           </a>
-          <EvaluationTable rows={evaluations} onView={handleViewReport} />
+          <EvaluationTable rows={evaluations} onView={handleViewReport} onEdit={handleEditEval} />
           <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 12 }}>
             <button
               type="button"
@@ -318,6 +343,21 @@ export function ManagerPage() {
 
       {reportEval && (
         <EvaluationReportModal evaluation={reportEval} onClose={() => setReportEval(null)} />
+      )}
+
+      {editEval && token && (
+        <EvaluationEditModal
+          token={token}
+          evaluation={editEval}
+          updateFn={updateManagerEvaluation}
+          showSubmit={false}
+          onSaved={(updated) => {
+            setEvaluations((prev) => prev.map((e) => (e.id === updated.id ? { ...e } : e)));
+            setEditEval(null);
+          }}
+          onSubmitted={() => setEditEval(null)}
+          onClose={() => setEditEval(null)}
+        />
       )}
     </>
   );
@@ -803,7 +843,7 @@ function monthLabel(dateStr: string) {
 }
 
 function ManagerDashboard({
-  rows, onGo, onExportCsv, onEmailCsv, appliedManagerQuery, onView
+  rows, onGo, onExportCsv, onEmailCsv, appliedManagerQuery, onView, onEdit
 }: {
   rows: EvaluationSummary[];
   onGo: (tab: ManagerTab) => void;
@@ -811,6 +851,7 @@ function ManagerDashboard({
   onEmailCsv: (payload: { to: string[]; subject?: string; message?: string; filters?: ManagerEvaluationQuery }) => Promise<void>;
   appliedManagerQuery: ManagerEvaluationQuery;
   onView?: (id: number) => void;
+  onEdit?: (id: number) => void;
 }) {
   const { total, submitted, recent7d, recent } = useMemo(() => {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -974,7 +1015,7 @@ function ManagerDashboard({
       <div className="card">
         <h2>Recent Evaluations</h2>
         {recent.length > 0 ? (
-          <EvaluationTable rows={recent} onView={onView} />
+          <EvaluationTable rows={recent} onView={onView} onEdit={onEdit} />
         ) : (
           <p style={{ color: "#64748b", fontSize: 14 }}>No evaluations yet.</p>
         )}
