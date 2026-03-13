@@ -1,5 +1,15 @@
 import type { EvaluationSummary } from "../types";
 
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
+}
+
+const GRADE_LABEL: Record<number, string> = {
+  1: "Remediate",
+  2: "Meets",
+  3: "Exceeds",
+};
+
 export function EvaluationTable({
   rows,
   onView,
@@ -20,7 +30,7 @@ export function EvaluationTable({
           <th>Supervisor</th>
           <th>Level</th>
           <th>Skill</th>
-          <th>Session</th>
+          <th>Grade</th>
           <th>Date</th>
           {hasActions && <th>Actions</th>}
         </tr>
@@ -33,8 +43,8 @@ export function EvaluationTable({
             <td>{row.supervisor_name}</td>
             <td>{row.level_name}</td>
             <td>{row.skill_name}</td>
-            <td>{row.session_label}</td>
-            <td>{row.session_date}</td>
+            <td>{row.final_grade != null ? `${row.final_grade} — ${GRADE_LABEL[row.final_grade] ?? ""}` : "—"}</td>
+            <td>{fmtDate(row.created_at)}</td>
             {hasActions && (
               <td>
                 <div style={{ display: "flex", gap: 6 }}>

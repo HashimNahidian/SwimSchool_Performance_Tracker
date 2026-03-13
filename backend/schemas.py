@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from models import EvaluationStatus, UserRole
+from models import UserRole
 
 
 class TokenResponse(BaseModel):
@@ -21,20 +21,20 @@ class RefreshRequest(BaseModel):
 
 
 class UserCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
+    full_name: str = Field(min_length=1, max_length=255)
     email: str = Field(min_length=3, max_length=255)
     phone: str | None = Field(default=None, max_length=25)
     password: str = Field(min_length=8)
     role: UserRole
-    active: bool = True
+    is_active: bool = True
 
 
 class UserUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=100)
+    full_name: str | None = Field(default=None, min_length=1, max_length=255)
     email: str | None = Field(default=None, min_length=3, max_length=255)
     phone: str | None = Field(default=None, max_length=25)
     role: UserRole | None = None
-    active: bool | None = None
+    is_active: bool | None = None
     password: str | None = Field(default=None, min_length=8)
 
 
@@ -43,21 +43,23 @@ class UserOut(BaseModel):
 
     id: int
     school_id: int
-    name: str
+    full_name: str
     email: str
     phone: str | None
     role: UserRole
-    active: bool
+    is_active: bool
 
+
+# ── Levels ───────────────────────────────────────────────────────────────────
 
 class LevelBase(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    active: bool = True
+    name: str = Field(min_length=1, max_length=100)
+    sort_order: int = 0
 
 
 class LevelUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=120)
-    active: bool | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    sort_order: int | None = None
 
 
 class LevelOut(BaseModel):
@@ -65,21 +67,21 @@ class LevelOut(BaseModel):
 
     id: int
     name: str
-    active: bool
+    sort_order: int
 
+
+# ── Skills ───────────────────────────────────────────────────────────────────
 
 class SkillBase(BaseModel):
     level_id: int
-    name: str = Field(min_length=1, max_length=120)
-    description: str | None = Field(default=None, max_length=2000)
-    active: bool = True
+    name: str = Field(min_length=1, max_length=255)
+    sort_order: int = 0
 
 
 class SkillUpdate(BaseModel):
     level_id: int | None = None
-    name: str | None = Field(default=None, min_length=1, max_length=120)
-    description: str | None = Field(default=None, max_length=2000)
-    active: bool | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    sort_order: int | None = None
 
 
 class SkillOut(BaseModel):
@@ -88,68 +90,55 @@ class SkillOut(BaseModel):
     id: int
     level_id: int
     name: str
-    description: str | None
-    active: bool
+    sort_order: int
+
+
+# ── Attributes ───────────────────────────────────────────────────────────────
+
+class AttributeBase(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    sort_order: int = 0
+
+
+class AttributeCreate(AttributeBase):
+    pass
+
+
+class AttributeUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    sort_order: int | None = None
 
 
 class AttributeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    school_id: int
     name: str
     description: str | None
-    active: bool
-
-
-class TemplateAttributeIn(BaseModel):
-    attribute_id: int
-    sort_order: int = Field(ge=1)
-
-
-class TemplateCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=160)
-    level_id: int | None = None
-    skill_id: int | None = None
-    active: bool = True
-    attributes: list[TemplateAttributeIn]
-
-
-class TemplateUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=160)
-    level_id: int | None = None
-    skill_id: int | None = None
-    active: bool | None = None
-    attributes: list[TemplateAttributeIn] | None = None
-
-
-class TemplateAttributeOut(BaseModel):
-    attribute_id: int
-    attribute_name: str
     sort_order: int
 
 
-class TemplateOut(BaseModel):
-    id: int
-    name: str
-    level_id: int | None
-    skill_id: int | None
-    active: bool
-    attributes: list[TemplateAttributeOut]
+# ── Skill ↔ Attribute links ───────────────────────────────────────────────────
 
+class SkillAttributeIn(BaseModel):
+    attribute_id: int
+
+
+# ── Evaluations ───────────────────────────────────────────────────────────────
 
 class RatingIn(BaseModel):
     attribute_id: int
-    rating_value: int = Field(ge=1, le=3)
+    rating: int = Field(ge=1, le=5)
+    comment: str | None = None
 
 
 class EvaluationCreate(BaseModel):
     instructor_id: int
-    level_id: int
     skill_id: int
-    session_label: str = Field(min_length=1, max_length=150)
-    session_date: date
     notes: str | None = None
-    template_id: int | None = None
     ratings: list[RatingIn] = Field(default_factory=list)
 
 
@@ -168,16 +157,16 @@ class EvaluationSummaryOut(BaseModel):
     level_name: str
     skill_id: int
     skill_name: str
-    session_label: str
-    session_date: date
-    status: EvaluationStatus
-    submitted_at: datetime | None
+    final_grade: int | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class RatingOut(BaseModel):
     attribute_id: int
     attribute_name: str
-    rating_value: int
+    rating: int
+    comment: str | None
 
 
 class EvaluationDetailOut(EvaluationSummaryOut):
@@ -188,10 +177,8 @@ class EvaluationDetailOut(EvaluationSummaryOut):
 class EvaluationFilterIn(BaseModel):
     instructor_id: int | None = None
     supervisor_id: int | None = None
-    level_id: int | None = None
     skill_id: int | None = None
-    rating_value: int | None = Field(default=None, ge=1, le=3)
-    status: EvaluationStatus | None = None
+    final_grade: int | None = Field(default=None, ge=1, le=5)
     date_from: date | None = None
     date_to: date | None = None
     sort_by: str | None = None

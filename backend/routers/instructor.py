@@ -19,7 +19,6 @@ instructor_guard = Depends(require_roles(UserRole.INSTRUCTOR))
 def list_my_evaluations(
     date_from: date | None = None,
     date_to: date | None = None,
-    level_id: int | None = None,
     skill_id: int | None = None,
     supervisor_id: int | None = None,
     db: Session = Depends(get_db),
@@ -28,11 +27,9 @@ def list_my_evaluations(
     stmt = evaluation_query_with_joins(current_user.school_id).where(Evaluation.instructor_id == current_user.id)
     filters = []
     if date_from:
-        filters.append(Evaluation.session_date >= date_from)
+        filters.append(Evaluation.created_at >= date_from)
     if date_to:
-        filters.append(Evaluation.session_date <= date_to)
-    if level_id:
-        filters.append(Evaluation.level_id == level_id)
+        filters.append(Evaluation.created_at <= date_to)
     if skill_id:
         filters.append(Evaluation.skill_id == skill_id)
     if supervisor_id:

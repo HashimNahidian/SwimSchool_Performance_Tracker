@@ -4,17 +4,14 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import require_roles
-from models import Evaluation, EvaluationStatus, User, UserRole
-from schemas import EvaluationCreate, EvaluationDetailOut, EvaluationSummaryOut, EvaluationUpdate, TemplateOut
+from models import Attribute, Evaluation, Level, Skill, SkillAttribute, User, UserRole
+from schemas import AttributeOut, EvaluationCreate, EvaluationDetailOut, EvaluationSummaryOut, EvaluationUpdate, LevelOut, SkillOut, UserOut
 from services import (
-    ensure_level_skill_compatible,
+    ensure_skill_in_school,
     ensure_user_role,
     evaluation_detail_row,
     evaluation_query_with_joins,
     evaluation_summary_row,
-    resolve_template,
-    submit_evaluation,
-    template_out,
     sync_ratings,
 )
 
@@ -23,19 +20,64 @@ router = APIRouter(prefix="/supervisor", tags=["supervisor"])
 supervisor_guard = Depends(require_roles(UserRole.SUPERVISOR))
 
 
-@router.get("/templates/resolve", response_model=TemplateOut, dependencies=[supervisor_guard])
-def resolve_evaluation_template(
-    level_id: int,
+@router.get("/levels", response_model=list[LevelOut], dependencies=[supervisor_guard])
+def list_levels(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
+) -> list[LevelOut]:
+    levels = db.scalars(select(Level).where(Level.school_id == current_user.school_id).order_by(Level.sort_order)).all()
+    return list(levels)
+
+
+@router.get("/skills", response_model=list[SkillOut], dependencies=[supervisor_guard])
+def list_skills(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
+) -> list[SkillOut]:
+    stmt = (
+        select(Skill)
+        .join(Level, Skill.level_id == Level.id)
+        .where(Level.school_id == current_user.school_id)
+        .order_by(Skill.sort_order)
+    )
+    skills = db.scalars(stmt).all()
+    return list(skills)
+
+
+@router.get("/instructors", response_model=list[UserOut], dependencies=[supervisor_guard])
+def list_instructors(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
+) -> list[UserOut]:
+    users = db.scalars(
+        select(User).where(
+            User.school_id == current_user.school_id,
+            User.role == UserRole.INSTRUCTOR,
+            User.is_active.is_(True),
+        ).order_by(User.full_name)
+    ).all()
+    return list(users)
+
+
+@router.get("/skills/{skill_id}/attributes", response_model=list[AttributeOut], dependencies=[supervisor_guard])
+def list_skill_attributes(
     skill_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
-) -> TemplateOut:
-    ensure_level_skill_compatible(db, level_id, skill_id, current_user.school_id)
-    template = resolve_template(db, level_id, skill_id, template_id=None, school_id=current_user.school_id)
-    if not template:
-        raise HTTPException(status_code=404, detail="No active template found for level/skill")
-    db.refresh(template)
-    return template_out(template)
+) -> list[Attribute]:
+    skill = db.scalar(
+        select(Skill)
+        .join(Level, Skill.level_id == Level.id)
+        .where(Skill.id == skill_id, Level.school_id == current_user.school_id)
+    )
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return db.scalars(
+        select(Attribute)
+        .join(SkillAttribute, Attribute.id == SkillAttribute.attribute_id)
+        .where(SkillAttribute.skill_id == skill_id)
+        .order_by(Attribute.sort_order.asc(), Attribute.name.asc())
+    ).all()
 
 
 @router.get("/evaluations/{evaluation_id}", response_model=EvaluationDetailOut, dependencies=[supervisor_guard])
@@ -57,7 +99,8 @@ def get_my_evaluation(
 
 @router.get("/evaluations", response_model=list[EvaluationSummaryOut], dependencies=[supervisor_guard])
 def list_my_evaluations(
-    db: Session = Depends(get_db), current_user: User = Depends(require_roles(UserRole.SUPERVISOR))
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
 ) -> list[EvaluationSummaryOut]:
     stmt = evaluation_query_with_joins(current_user.school_id).where(Evaluation.supervisor_id == current_user.id)
     evaluations = db.scalars(stmt).all()
@@ -71,30 +114,21 @@ def create_evaluation(
     current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
 ) -> EvaluationDetailOut:
     ensure_user_role(db, payload.instructor_id, UserRole.INSTRUCTOR, current_user.school_id)
-    ensure_level_skill_compatible(db, payload.level_id, payload.skill_id, current_user.school_id)
-    template = resolve_template(
-        db, payload.level_id, payload.skill_id, payload.template_id, current_user.school_id
-    )
+    ensure_skill_in_school(db, payload.skill_id, current_user.school_id)
 
     evaluation = Evaluation(
         school_id=current_user.school_id,
         instructor_id=payload.instructor_id,
         supervisor_id=current_user.id,
-        level_id=payload.level_id,
         skill_id=payload.skill_id,
-        template_id=template.id if template else None,
-        session_label=payload.session_label.strip(),
-        session_date=payload.session_date,
         notes=payload.notes,
-        status=EvaluationStatus.DRAFT,
     )
     db.add(evaluation)
     db.flush()
-    sync_ratings(db, evaluation, [(r.attribute_id, r.rating_value) for r in payload.ratings])
+    sync_ratings(db, evaluation, [(r.attribute_id, r.rating, r.comment) for r in payload.ratings])
     db.commit()
 
-    stmt = evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation.id)
-    created = db.scalar(stmt)
+    created = db.scalar(evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation.id))
     if not created:
         raise HTTPException(status_code=500, detail="Failed to reload evaluation")
     return evaluation_detail_row(created)
@@ -116,40 +150,10 @@ def update_evaluation(
     )
     if not evaluation:
         raise HTTPException(status_code=404, detail="Evaluation not found")
-    if evaluation.status == EvaluationStatus.SUBMITTED:
-        raise HTTPException(status_code=400, detail="Cannot modify a submitted evaluation")
 
     evaluation.notes = payload.notes
     if payload.ratings is not None:
-        sync_ratings(db, evaluation, [(r.attribute_id, r.rating_value) for r in payload.ratings])
-    db.commit()
-
-    full = db.scalar(evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation.id))
-    if not full:
-        raise HTTPException(status_code=500, detail="Failed to reload evaluation")
-    return evaluation_detail_row(full)
-
-
-@router.post(
-    "/evaluations/{evaluation_id}/submit",
-    response_model=EvaluationDetailOut,
-    dependencies=[supervisor_guard],
-)
-def submit_my_evaluation(
-    evaluation_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
-) -> EvaluationDetailOut:
-    evaluation = db.scalar(
-        select(Evaluation).where(
-            Evaluation.id == evaluation_id,
-            Evaluation.school_id == current_user.school_id,
-            Evaluation.supervisor_id == current_user.id,
-        )
-    )
-    if not evaluation:
-        raise HTTPException(status_code=404, detail="Evaluation not found")
-    submit_evaluation(evaluation)
+        sync_ratings(db, evaluation, [(r.attribute_id, r.rating, r.comment) for r in payload.ratings])
     db.commit()
 
     full = db.scalar(evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation.id))

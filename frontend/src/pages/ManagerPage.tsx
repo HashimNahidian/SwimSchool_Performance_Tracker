@@ -26,14 +26,13 @@ import { EvaluationTable } from "../components/EvaluationTable";
 import { BarChart } from "../components/BarChart";
 import { EvaluationReportModal } from "../components/EvaluationReport";
 import { EvaluationEditModal } from "../components/EvaluationEditModal";
-import { DEMO_EVALUATIONS, DEMO_LEVELS, DEMO_SKILLS, DEMO_USERS } from "../mockData";
 
 type ManagerTab = "dashboard" | "users" | "levels" | "evaluations";
 
 const MANAGER_TABS: ManagerTab[] = ["dashboard", "users", "levels", "evaluations"];
 
 const SORT_FIELDS = new Set<NonNullable<ManagerEvaluationQuery["sort_by"]>>([
-  "id", "session_date", "submitted_at", "instructor_id", "supervisor_id", "level_id", "skill_id"
+  "id", "created_at", "updated_at", "instructor_id", "supervisor_id", "skill_id", "final_grade"
 ]);
 const EVALUATIONS_PAGE_SIZE = 25;
 
@@ -47,19 +46,17 @@ function buildQuery(filters: Record<string, string>): ManagerEvaluationQuery {
   const q: ManagerEvaluationQuery = {};
   const instructorId = parsePositiveInt(filters.instructor_id);
   const supervisorId = parsePositiveInt(filters.supervisor_id);
-  const levelId = parsePositiveInt(filters.level_id);
   const skillId = parsePositiveInt(filters.skill_id);
-  const ratingValue = parsePositiveInt(filters.rating_value);
+  const finalGrade = parsePositiveInt(filters.final_grade);
   if (instructorId !== undefined) q.instructor_id = instructorId;
   if (supervisorId !== undefined) q.supervisor_id = supervisorId;
-  if (levelId !== undefined) q.level_id = levelId;
   if (skillId !== undefined) q.skill_id = skillId;
-  if (ratingValue !== undefined) q.rating_value = ratingValue;
+  if (finalGrade !== undefined) q.final_grade = finalGrade;
   if (filters.date_from) q.date_from = filters.date_from;
   if (filters.date_to) q.date_to = filters.date_to;
   q.sort_by = SORT_FIELDS.has(filters.sort_by as NonNullable<ManagerEvaluationQuery["sort_by"]>)
     ? (filters.sort_by as NonNullable<ManagerEvaluationQuery["sort_by"]>)
-    : "submitted_at";
+    : "created_at";
   q.sort_dir = filters.sort_dir === "asc" ? "asc" : "desc";
   return q;
 }
@@ -72,17 +69,16 @@ export function ManagerPage() {
   const [levels, setLevels] = useState<Level[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
-  const [isDemo, setIsDemo] = useState(false);
   const [reportEval, setReportEval] = useState<EvaluationDetail | null>(null);
   const [editEval, setEditEval] = useState<EvaluationDetail | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [filters, setFilters] = useState({
-    instructor_id: "", supervisor_id: "", level_id: "", skill_id: "",
-    rating_value: "", date_from: "", date_to: "",
-    sort_by: "submitted_at", sort_dir: "desc"
+    instructor_id: "", supervisor_id: "", skill_id: "",
+    final_grade: "", date_from: "", date_to: "",
+    sort_by: "created_at", sort_dir: "desc"
   });
   const [appliedQuery, setAppliedQuery] = useState<ManagerEvaluationQuery>({
-    sort_by: "submitted_at", sort_dir: "desc", limit: EVALUATIONS_PAGE_SIZE, offset: 0
+    sort_by: "created_at", sort_dir: "desc", limit: EVALUATIONS_PAGE_SIZE, offset: 0
   });
   const [evaluationsPage, setEvaluationsPage] = useState(0);
 
@@ -93,24 +89,12 @@ export function ManagerPage() {
       listManagerEvaluationsWithQuery(token, appliedQuery)
     ])
       .then(([u, l, s, e]) => {
-        setUsers(u.length > 0 ? u : DEMO_USERS);
-        setLevels(l.length > 0 ? l : DEMO_LEVELS);
-        setSkills(s.length > 0 ? s : DEMO_SKILLS);
-        if (e.length === 0) {
-          setEvaluations(DEMO_EVALUATIONS);
-          setIsDemo(true);
-        } else {
-          setEvaluations(e);
-        }
+        setUsers(u);
+        setLevels(l);
+        setSkills(s);
+        setEvaluations(e);
       })
-      .catch((e: Error) => {
-        setError(e.message);
-        setUsers(DEMO_USERS);
-        setLevels(DEMO_LEVELS);
-        setSkills(DEMO_SKILLS);
-        setEvaluations(DEMO_EVALUATIONS);
-        setIsDemo(true);
-      });
+      .catch((e: Error) => setError(e.message));
   }, [token, appliedQuery]);
 
   function downloadCsv() {
@@ -132,11 +116,6 @@ export function ManagerPage() {
   }
 
   async function handleViewReport(id: number) {
-    if (isDemo) {
-      const found = DEMO_EVALUATIONS.find((e) => e.id === id);
-      if (found) setReportEval({ ...found, notes: "Demo evaluation — no live data.", ratings: [] });
-      return;
-    }
     if (!token) return;
     setLoadingReport(true);
     try {
@@ -150,14 +129,6 @@ export function ManagerPage() {
   }
 
   async function handleEditEval(id: number) {
-    if (isDemo) {
-      const found = DEMO_EVALUATIONS.find((e) => e.id === id);
-      if (found) setEditEval({ ...found, notes: "Demo evaluation.", ratings: [
-        { attribute_id: 1, attribute_name: "Water Safety", rating_value: 2 },
-        { attribute_id: 2, attribute_name: "Stroke Technique", rating_value: 2 },
-      ]});
-      return;
-    }
     if (!token) return;
     setLoadingReport(true);
     try {
@@ -175,13 +146,6 @@ export function ManagerPage() {
   return (
     <>
       {error && <p className="error">{error}</p>}
-
-      {isDemo && (
-        <div className="demo-banner">
-          <span>🏊</span>
-          <span>Demo mode — showing sample data. Connect to the API to see live evaluations.</span>
-        </div>
-      )}
 
       <nav className="tabs">
         {MANAGER_TABS.map((item) => (
@@ -237,27 +201,23 @@ export function ManagerPage() {
               onChange={(e) => setFilters((p) => ({ ...p, instructor_id: e.target.value }))} />
             <input placeholder="supervisor id" value={filters.supervisor_id}
               onChange={(e) => setFilters((p) => ({ ...p, supervisor_id: e.target.value }))} />
-            <select value={filters.level_id}
-              onChange={(e) => setFilters((p) => ({ ...p, level_id: e.target.value }))}>
-              <option value="">all levels</option>
-              {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
             <select value={filters.skill_id}
               onChange={(e) => setFilters((p) => ({ ...p, skill_id: e.target.value }))}>
               <option value="">all skills</option>
               {skills.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-            <select value={filters.rating_value}
-              onChange={(e) => setFilters((p) => ({ ...p, rating_value: e.target.value }))}>
-              <option value="">all ratings</option>
+            <select value={filters.final_grade}
+              onChange={(e) => setFilters((p) => ({ ...p, final_grade: e.target.value }))}>
+              <option value="">all grades</option>
               <option value="1">1 — Remediate</option>
               <option value="2">2 — Meets</option>
               <option value="3">3 — Exceeds</option>
             </select>
             <select value={filters.sort_by}
               onChange={(e) => setFilters((p) => ({ ...p, sort_by: e.target.value }))}>
-              <option value="submitted_at">submitted at</option>
-              <option value="session_date">session date</option>
+              <option value="created_at">date created</option>
+              <option value="updated_at">date updated</option>
+              <option value="final_grade">final grade</option>
               <option value="id">id</option>
               <option value="instructor_id">instructor</option>
               <option value="supervisor_id">supervisor</option>
@@ -377,17 +337,17 @@ function ManagerUsers({
   onUpdated: (u: User) => void;
   onDeleted: (id: number) => void;
 }) {
-  const [name, setName] = useState("");
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<UserRole>("INSTRUCTOR");
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editName, setEditName] = useState("");
+  const [editFullName, setEditFullName] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editRole, setEditRole] = useState<UserRole>("INSTRUCTOR");
-  const [editActive, setEditActive] = useState(true);
+  const [editIsActive, setEditIsActive] = useState(true);
   const [editPassword, setEditPassword] = useState("");
   const [error, setError] = useState("");
 
@@ -396,15 +356,15 @@ function ManagerUsers({
     try {
       setError("");
       const user = await createUser(token, {
-        name,
+        full_name: fullName,
         email,
         phone: phone.trim() || null,
         password,
         role,
-        active: true,
+        is_active: true,
       });
       onCreated(user);
-      setName("");
+      setFullName("");
       setEmail("");
       setPhone("");
       setPassword("");
@@ -415,11 +375,11 @@ function ManagerUsers({
 
   function beginEdit(user: User) {
     setEditingId(user.id);
-    setEditName(user.name);
+    setEditFullName(user.full_name);
     setEditEmail(user.email);
     setEditPhone(user.phone ?? "");
     setEditRole(user.role);
-    setEditActive(user.active);
+    setEditIsActive(user.is_active);
     setEditPassword("");
     setError("");
   }
@@ -433,18 +393,18 @@ function ManagerUsers({
     try {
       setError("");
       const payload: {
-        name: string;
+        full_name: string;
         email: string;
         phone: string | null;
         role: UserRole;
-        active: boolean;
+        is_active: boolean;
         password?: string;
       } = {
-        name: editName,
+        full_name: editFullName,
         email: editEmail,
         phone: editPhone.trim() || null,
         role: editRole,
-        active: editActive,
+        is_active: editIsActive,
       };
       if (editPassword.trim()) payload.password = editPassword.trim();
       const updated = await updateUser(token, userId, payload);
@@ -456,7 +416,7 @@ function ManagerUsers({
   }
 
   async function removeUser(user: User) {
-    const confirmed = window.confirm(`Delete user ${user.name}?`);
+    const confirmed = window.confirm(`Delete user ${user.full_name}?`);
     if (!confirmed) return;
     try {
       setError("");
@@ -475,7 +435,7 @@ function ManagerUsers({
   return (
     <Section title="Users">
       <form className="form inline" onSubmit={onSubmit}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" required />
+        <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Full name" required />
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" type="email" required />
         <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone (optional)" />
         <input value={password} onChange={(e) => setPassword(e.target.value)}
@@ -500,7 +460,7 @@ function ManagerUsers({
                   <tr key={u.id}>
                     {editingId === u.id ? (
                       <>
-                        <td><input value={editName} onChange={(e) => setEditName(e.target.value)} /></td>
+                        <td><input value={editFullName} onChange={(e) => setEditFullName(e.target.value)} /></td>
                         <td><input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} /></td>
                         <td><input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} /></td>
                         <td>
@@ -514,8 +474,8 @@ function ManagerUsers({
                           <label style={{ flexDirection: "row", alignItems: "center", gap: 6, fontWeight: 400 }}>
                             <input
                               type="checkbox"
-                              checked={editActive}
-                              onChange={(e) => setEditActive(e.target.checked)}
+                              checked={editIsActive}
+                              onChange={(e) => setEditIsActive(e.target.checked)}
                               style={{ width: "auto" }}
                             />
                             Active
@@ -538,11 +498,11 @@ function ManagerUsers({
                       </>
                     ) : (
                       <>
-                        <td>{u.name}</td>
+                        <td>{u.full_name}</td>
                         <td>{u.email}</td>
                         <td>{u.phone || "-"}</td>
                         <td>{u.role}</td>
-                        <td>{u.active ? "Yes" : "No"}</td>
+                        <td>{u.is_active ? "Yes" : "No"}</td>
                         <td>
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                             <button type="button" onClick={() => beginEdit(u)}>Edit</button>
@@ -586,16 +546,12 @@ function ManagerLevels({
   const [levelName, setLevelName] = useState("");
   const [editingLevelId, setEditingLevelId] = useState<number | null>(null);
   const [editLevelName, setEditLevelName] = useState("");
-  const [editLevelActive, setEditLevelActive] = useState(true);
 
   const [skillName, setSkillName] = useState("");
-  const [skillDescription, setSkillDescription] = useState("");
   const [skillLevelId, setSkillLevelId] = useState<number>(levels[0]?.id ?? 0);
   const [editingSkillId, setEditingSkillId] = useState<number | null>(null);
   const [editSkillName, setEditSkillName] = useState("");
-  const [editSkillDescription, setEditSkillDescription] = useState("");
   const [editSkillLevelId, setEditSkillLevelId] = useState<number>(levels[0]?.id ?? 0);
-  const [editSkillActive, setEditSkillActive] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -606,7 +562,7 @@ function ManagerLevels({
     e.preventDefault();
     try {
       setError("");
-      const level = await createLevel(token, { name: levelName, active: true });
+      const level = await createLevel(token, { name: levelName });
       onLevelCreated(level);
       setLevelName("");
     } catch (err) {
@@ -617,14 +573,13 @@ function ManagerLevels({
   function beginEditLevel(level: Level) {
     setEditingLevelId(level.id);
     setEditLevelName(level.name);
-    setEditLevelActive(level.active);
     setError("");
   }
 
   async function saveLevel(levelId: number) {
     try {
       setError("");
-      const updated = await updateLevel(token, levelId, { name: editLevelName, active: editLevelActive });
+      const updated = await updateLevel(token, levelId, { name: editLevelName });
       onLevelUpdated(updated);
       setEditingLevelId(null);
     } catch (err) {
@@ -651,13 +606,10 @@ function ManagerLevels({
       setError("");
       const skill = await createSkill(token, {
         name: skillName,
-        description: skillDescription.trim() || undefined,
         level_id: skillLevelId,
-        active: true,
       });
       onSkillCreated(skill);
       setSkillName("");
-      setSkillDescription("");
     } catch (err) {
       setError((err as Error).message);
     }
@@ -666,9 +618,7 @@ function ManagerLevels({
   function beginEditSkill(skill: Skill) {
     setEditingSkillId(skill.id);
     setEditSkillName(skill.name);
-    setEditSkillDescription(skill.description ?? "");
     setEditSkillLevelId(skill.level_id);
-    setEditSkillActive(skill.active);
     setError("");
   }
 
@@ -677,9 +627,7 @@ function ManagerLevels({
       setError("");
       const updated = await updateSkill(token, skillId, {
         name: editSkillName,
-        description: editSkillDescription.trim() || null,
         level_id: editSkillLevelId,
-        active: editSkillActive,
       });
       onSkillUpdated(updated);
       setEditingSkillId(null);
@@ -714,24 +662,13 @@ function ManagerLevels({
       </form>
 
       <table>
-        <thead><tr><th>Level Name</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Level Name</th><th>Actions</th></tr></thead>
         <tbody>
           {levels.map((l) => (
             <tr key={l.id}>
               {editingLevelId === l.id ? (
                 <>
                   <td><input value={editLevelName} onChange={(e) => setEditLevelName(e.target.value)} /></td>
-                  <td>
-                    <label style={{ flexDirection: "row", alignItems: "center", gap: 6, fontWeight: 400 }}>
-                      <input
-                        type="checkbox"
-                        checked={editLevelActive}
-                        onChange={(e) => setEditLevelActive(e.target.checked)}
-                        style={{ width: "auto" }}
-                      />
-                      Active
-                    </label>
-                  </td>
                   <td>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button type="button" onClick={() => saveLevel(l.id)}>Save</button>
@@ -742,9 +679,6 @@ function ManagerLevels({
               ) : (
                 <>
                   <td>{l.name}</td>
-                  <td>
-                    <span className={l.active ? "badge-submitted" : "badge-draft"}>{l.active ? "Active" : "Inactive"}</span>
-                  </td>
                   <td>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button type="button" onClick={() => beginEditLevel(l)}>Edit</button>
@@ -762,7 +696,6 @@ function ManagerLevels({
         <p className="chart-section-title">Skills</p>
         <form className="form inline" onSubmit={onCreateSkill}>
           <input value={skillName} onChange={(e) => setSkillName(e.target.value)} placeholder="e.g. Freestyle" required />
-          <input value={skillDescription} onChange={(e) => setSkillDescription(e.target.value)} placeholder="Description" />
           <select value={skillLevelId} onChange={(e) => setSkillLevelId(Number(e.target.value))}>
             {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
@@ -771,7 +704,7 @@ function ManagerLevels({
       </div>
 
       <table>
-        <thead><tr><th>Skill</th><th>Level</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Skill</th><th>Level</th><th>Actions</th></tr></thead>
         <tbody>
           {skills.map((s) => (
             <tr key={s.id}>
@@ -782,18 +715,6 @@ function ManagerLevels({
                     <select value={editSkillLevelId} onChange={(e) => setEditSkillLevelId(Number(e.target.value))}>
                       {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                     </select>
-                  </td>
-                  <td><input value={editSkillDescription} onChange={(e) => setEditSkillDescription(e.target.value)} /></td>
-                  <td>
-                    <label style={{ flexDirection: "row", alignItems: "center", gap: 6, fontWeight: 400 }}>
-                      <input
-                        type="checkbox"
-                        checked={editSkillActive}
-                        onChange={(e) => setEditSkillActive(e.target.checked)}
-                        style={{ width: "auto" }}
-                      />
-                      Active
-                    </label>
                   </td>
                   <td>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -806,10 +727,6 @@ function ManagerLevels({
                 <>
                   <td>{s.name}</td>
                   <td>{levels.find((l) => l.id === s.level_id)?.name ?? s.level_id}</td>
-                  <td style={{ color: "#64748b" }}>{s.description ?? "-"}</td>
-                  <td>
-                    <span className={s.active ? "badge-submitted" : "badge-draft"}>{s.active ? "Active" : "Inactive"}</span>
-                  </td>
                   <td>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button type="button" onClick={() => beginEditSkill(s)}>Edit</button>
@@ -852,14 +769,14 @@ function ManagerDashboard({
   onView?: (id: number) => void;
   onEdit?: (id: number) => void;
 }) {
-  const { total, submitted, recent7d, recent } = useMemo(() => {
+  const { total, graded, recent7d, recent } = useMemo(() => {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    let submitted = 0, recent7d = 0;
+    let graded = 0, recent7d = 0;
     for (const r of rows) {
-      if (r.status === "SUBMITTED") submitted++;
-      if (r.session_date && new Date(r.session_date) >= weekAgo) recent7d++;
+      if (r.final_grade != null) graded++;
+      if (new Date(r.created_at) >= weekAgo) recent7d++;
     }
-    return { total: rows.length, submitted, recent7d, recent: rows.slice(0, 8) };
+    return { total: rows.length, graded, recent7d, recent: rows.slice(0, 8) };
   }, [rows]);
 
   // Instructor performance chart
@@ -889,10 +806,8 @@ function ManagerDashboard({
   const monthlyData = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const r of rows) {
-      if (r.session_date) {
-        const key = r.session_date.slice(0, 7);
-        counts[key] = (counts[key] ?? 0) + 1;
-      }
+      const key = r.created_at.slice(0, 7);
+      counts[key] = (counts[key] ?? 0) + 1;
     }
     return Object.entries(counts)
       .sort(([a], [b]) => a.localeCompare(b))
@@ -931,8 +846,8 @@ function ManagerDashboard({
       {/* Stat cards */}
       <div className="stat-cards">
         <StatCard label="Total Evaluations" value={total} color="#023e8a" />
-        <StatCard label="Submitted" value={submitted} color="#0077b6" />
-        <StatCard label="Sessions This Week" value={recent7d} color="#0f9b8e" />
+        <StatCard label="Graded" value={graded} color="#0077b6" />
+        <StatCard label="This Week" value={recent7d} color="#0f9b8e" />
       </div>
 
       {/* Quick actions */}
@@ -1015,6 +930,3 @@ function ManagerDashboard({
     </>
   );
 }
-
-
-

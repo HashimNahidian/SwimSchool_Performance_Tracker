@@ -28,7 +28,7 @@ def get_current_user(
         raise credentials_error from exc
 
     user = db.get(User, user_id)
-    if not user or not user.active or not user.school_id:
+    if not user or not user.is_active or not user.school_id:
         raise credentials_error
     return user
 

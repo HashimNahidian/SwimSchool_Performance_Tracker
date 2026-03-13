@@ -1,5 +1,4 @@
 import csv
-from datetime import date, datetime, timezone
 import io
 from pathlib import Path
 import sys
@@ -66,11 +65,11 @@ def create_user(
 ) -> models.User:
     user = models.User(
         school_id=school_id,
-        name=name,
+        full_name=name,
         email=email,
         password_hash=hash_password("TestPass123!"),
         role=role,
-        active=True,
+        is_active=True,
     )
     db.add(user)
     db.flush()
@@ -78,8 +77,8 @@ def create_user(
 
 
 def seed_two_school_evals(db: Session) -> dict[str, int | str]:
-    school_a = models.School(name="School A", active=True)
-    school_b = models.School(name="School B", active=True)
+    school_a = models.School(name="School A")
+    school_b = models.School(name="School B")
     db.add_all([school_a, school_b])
     db.flush()
 
@@ -126,13 +125,13 @@ def seed_two_school_evals(db: Session) -> dict[str, int | str]:
         role=models.UserRole.INSTRUCTOR,
     )
 
-    level_a = models.Level(school_id=school_a.id, name="Level A", active=True)
-    level_b = models.Level(school_id=school_b.id, name="Level B", active=True)
+    level_a = models.Level(school_id=school_a.id, name="Level A")
+    level_b = models.Level(school_id=school_b.id, name="Level B")
     db.add_all([level_a, level_b])
     db.flush()
 
-    skill_a = models.Skill(school_id=school_a.id, level_id=level_a.id, name="Skill A", active=True)
-    skill_b = models.Skill(school_id=school_b.id, level_id=level_b.id, name="Skill B", active=True)
+    skill_a = models.Skill(level_id=level_a.id, name="Skill A")
+    skill_b = models.Skill(level_id=level_b.id, name="Skill B")
     db.add_all([skill_a, skill_b])
     db.flush()
 
@@ -140,25 +139,15 @@ def seed_two_school_evals(db: Session) -> dict[str, int | str]:
         school_id=school_a.id,
         instructor_id=instructor_a.id,
         supervisor_id=supervisor_a.id,
-        level_id=level_a.id,
         skill_id=skill_a.id,
-        session_label="School A Session",
-        session_date=date(2026, 2, 23),
-        notes="A notes",
-        status=models.EvaluationStatus.SUBMITTED,
-        submitted_at=datetime.now(timezone.utc),
+        notes="School A notes",
     )
     eval_b = models.Evaluation(
         school_id=school_b.id,
         instructor_id=instructor_b.id,
         supervisor_id=supervisor_b.id,
-        level_id=level_b.id,
         skill_id=skill_b.id,
-        session_label="School B Session",
-        session_date=date(2026, 2, 23),
-        notes="B notes",
-        status=models.EvaluationStatus.SUBMITTED,
-        submitted_at=datetime.now(timezone.utc),
+        notes="School B notes",
     )
     db.add_all([eval_a, eval_b])
     db.commit()
@@ -221,10 +210,9 @@ def test_manager_email_export_filters_are_school_scoped(
     csv_text = captured["csv"]
     rows = list(csv.DictReader(io.StringIO(csv_text)))
 
+    # Cross-tenant filter: manager_b filtering by instructor_a should return no rows
     assert len(rows) == 0
-    assert all(row["session_label"] == "School B Session" for row in rows)
     assert all(row["evaluation_id"] != str(seeded["eval_a_id"]) for row in rows)
-    assert all(row["session_label"] != "School A Session" for row in rows)
 
 
 def test_manager_email_export_includes_rows_for_own_tenant(
@@ -265,7 +253,6 @@ def test_manager_email_export_includes_rows_for_own_tenant(
 
     assert len(rows) == 1
     row = rows[0]
-    assert row["session_label"] == "School B Session"
-    assert "School A Session" not in row.values()
+    assert row["notes"] == "School B notes"
     assert row["evaluation_id"] == str(seeded["eval_b_id"])
     assert row["evaluation_id"] != str(seeded["eval_a_id"])

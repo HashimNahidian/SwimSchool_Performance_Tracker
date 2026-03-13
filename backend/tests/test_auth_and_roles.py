@@ -8,11 +8,11 @@ def test_bootstrap_login_and_manager_access(client):
     bootstrap = client.post(
         "/auth/bootstrap-manager",
         json={
-            "name": "Admin",
+            "full_name": "Admin",
             "email": "admin@example.com",
             "password": "StrongPass123!",
             "role": "MANAGER",
-            "active": True,
+            "is_active": True,
         },
     )
     assert bootstrap.status_code == 200, bootstrap.text
@@ -44,11 +44,11 @@ def test_refresh_token_rotation(client):
     client.post(
         "/auth/bootstrap-manager",
         json={
-            "name": "Admin",
+            "full_name": "Admin",
             "email": "rotate@example.com",
             "password": "StrongPass123!",
             "role": "MANAGER",
-            "active": True,
+            "is_active": True,
         },
     )
     login = client.post(

@@ -1,11 +1,13 @@
 import { FormEvent, useState } from "react";
-import { submitSupervisorEvaluation, updateSupervisorEvaluation } from "../api";
+import { updateSupervisorEvaluation } from "../api";
 import type { EvaluationDetail } from "../types";
 
 const RATING_LABEL: Record<number, string> = {
-  1: "1 - Remediate",
-  2: "2 - Meets Standard",
-  3: "3 - Exceeds Standard",
+  1: "1 - Does not meet Standards",
+  2: "2 - Needs Improvement",
+  3: "3 - Meets Standard",
+  4: "4 - Exceeds Standard",
+  5: "5 - Outstanding",
 };
 
 export function EvaluationEditModal({
@@ -15,24 +17,22 @@ export function EvaluationEditModal({
   onSubmitted,
   onClose,
   updateFn = updateSupervisorEvaluation,
-  showSubmit = true,
+  showSubmit = false,
 }: {
   token: string;
   evaluation: EvaluationDetail;
   onSaved: (updated: EvaluationDetail) => void;
   onSubmitted: (updated: EvaluationDetail) => void;
   onClose: () => void;
-  updateFn?: (token: string, id: number, payload: { notes?: string | null; ratings?: Array<{ attribute_id: number; rating_value: number }> }) => Promise<EvaluationDetail>;
+  updateFn?: (token: string, id: number, payload: { notes?: string | null; ratings?: Array<{ attribute_id: number; rating: number; comment?: string | null }> }) => Promise<EvaluationDetail>;
   showSubmit?: boolean;
 }) {
   const [notes, setNotes] = useState(evaluation.notes ?? "");
   const [ratings, setRatings] = useState<Record<number, number>>(
-    Object.fromEntries(evaluation.ratings.map((r) => [r.attribute_id, r.rating_value]))
+    Object.fromEntries(evaluation.ratings.map((r) => [r.attribute_id, r.rating]))
   );
   const [saving, setSaving] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [confirmSubmit, setConfirmSubmit] = useState(false);
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
@@ -43,7 +43,7 @@ export function EvaluationEditModal({
         notes: notes.trim() || null,
         ratings: Object.entries(ratings).map(([id, value]) => ({
           attribute_id: Number(id),
-          rating_value: value,
+          rating: value,
         })),
       });
       onSaved(updated);
@@ -54,33 +54,12 @@ export function EvaluationEditModal({
     }
   }
 
-  async function handleSubmit() {
-    setSubmitting(true);
-    setError("");
-    try {
-      await updateFn(token, evaluation.id, {
-        notes: notes.trim() || null,
-        ratings: Object.entries(ratings).map(([id, value]) => ({
-          attribute_id: Number(id),
-          rating_value: value,
-        })),
-      });
-      const submitted = await submitSupervisorEvaluation(token, evaluation.id);
-      onSubmitted(submitted);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSubmitting(false);
-      setConfirmSubmit(false);
-    }
-  }
-
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-toolbar">
           <span style={{ fontWeight: 700, color: "#023e8a", fontSize: 15 }}>
-            Edit Draft - #{evaluation.id} - {evaluation.instructor_name}
+            Edit Evaluation - #{evaluation.id} - {evaluation.instructor_name}
           </span>
           <button className="btn-add" onClick={onClose}>Close</button>
         </div>
@@ -96,12 +75,8 @@ export function EvaluationEditModal({
               <span className="report-info-value">{evaluation.skill_name}</span>
             </div>
             <div className="report-info-item">
-              <span className="report-info-label">Session</span>
-              <span className="report-info-value">{evaluation.session_label}</span>
-            </div>
-            <div className="report-info-item">
               <span className="report-info-label">Date</span>
-              <span className="report-info-value">{evaluation.session_date}</span>
+              <span className="report-info-value">{new Date(evaluation.created_at).toLocaleDateString()}</span>
             </div>
           </div>
 
@@ -118,12 +93,12 @@ export function EvaluationEditModal({
                   <label key={r.attribute_id} className="inline-rating edit-rating-row">
                     <span className="edit-rating-label">{r.attribute_name}</span>
                     <select
-                      value={ratings[r.attribute_id] ?? 2}
+                      value={ratings[r.attribute_id] ?? 3}
                       onChange={(e) =>
                         setRatings((prev) => ({ ...prev, [r.attribute_id]: Number(e.target.value) }))
                       }
                     >
-                      {[1, 2, 3].map((v) => (
+                      {[1, 2, 3, 4, 5].map((v) => (
                         <option key={v} value={v}>{RATING_LABEL[v]}</option>
                       ))}
                     </select>
@@ -152,39 +127,6 @@ export function EvaluationEditModal({
               <button type="submit" disabled={saving}>
                 {saving ? "Saving..." : "Save Changes"}
               </button>
-
-              {showSubmit && (
-                !confirmSubmit ? (
-                  <button
-                    type="button"
-                    style={{ background: "#0f9b8e" }}
-                    onClick={() => setConfirmSubmit(true)}
-                  >
-                    Submit Evaluation
-                  </button>
-                ) : (
-                  <div className="edit-modal-confirm-row">
-                    <span style={{ fontSize: 14, fontWeight: 600, color: "#023e8a" }}>
-                      Submit and lock this evaluation?
-                    </span>
-                    <button
-                      type="button"
-                      style={{ background: "#0f9b8e" }}
-                      disabled={submitting}
-                      onClick={handleSubmit}
-                    >
-                      {submitting ? "Submitting..." : "Confirm Submit"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-add"
-                      onClick={() => setConfirmSubmit(false)}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )
-              )}
             </div>
           </form>
         </div>

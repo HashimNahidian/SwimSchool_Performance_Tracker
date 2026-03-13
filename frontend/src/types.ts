@@ -2,11 +2,12 @@ export type UserRole = "MANAGER" | "SUPERVISOR" | "INSTRUCTOR";
 
 export type User = {
   id: number;
-  name: string;
+  school_id: number;
+  full_name: string;
   email: string;
   phone?: string | null;
   role: UserRole;
-  active: boolean;
+  is_active: boolean;
 };
 
 export type TokenResponse = {
@@ -18,22 +19,22 @@ export type TokenResponse = {
 export type Level = {
   id: number;
   name: string;
-  active: boolean;
+  sort_order: number;
 };
 
 export type Skill = {
   id: number;
   level_id: number;
   name: string;
-  description: string | null;
-  active: boolean;
+  sort_order: number;
 };
 
 export type Attribute = {
   id: number;
+  school_id: number;
   name: string;
   description: string | null;
-  active: boolean;
+  sort_order: number;
 };
 
 export type EvaluationSummary = {
@@ -46,43 +47,19 @@ export type EvaluationSummary = {
   level_name: string;
   skill_id: number;
   skill_name: string;
-  session_label: string;
-  session_date: string;
-  status: "DRAFT" | "SUBMITTED";
-  submitted_at: string | null;
+  final_grade: number | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type RatingOut = {
   attribute_id: number;
   attribute_name: string;
-  rating_value: number;
+  rating: number;
+  comment: string | null;
 };
 
 export type EvaluationDetail = EvaluationSummary & {
   notes: string | null;
   ratings: RatingOut[];
-};
-
-export type TemplateCriterion = {
-  attribute_id: number;
-  attribute_name: string;
-  sort_order: number;
-};
-
-export type TemplateResolved = {
-  id: number;
-  name: string;
-  level_id: number | null;
-  skill_id: number | null;
-  active: boolean;
-  attributes: TemplateCriterion[];
-};
-
-export type TemplateConfig = {
-  id: number;
-  name: string;
-  level_id: number | null;
-  skill_id: number | null;
-  active: boolean;
-  attributes: TemplateCriterion[];
 };

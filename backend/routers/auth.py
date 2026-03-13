@@ -38,7 +38,7 @@ def bootstrap_manager(payload: UserCreate, db: Session = Depends(get_db)) -> Use
         raise HTTPException(status_code=403, detail="Bootstrap is disabled in production")
     school = db.scalar(select(School).order_by(School.id.asc()))
     if not school:
-        school = School(name="Default School", active=True)
+        school = School(name="Default School")
         db.add(school)
         db.flush()
     manager_exists = db.scalar(
@@ -52,11 +52,11 @@ def bootstrap_manager(payload: UserCreate, db: Session = Depends(get_db)) -> Use
     normalized_email = payload.email.strip().lower()
     user = User(
         school_id=school.id,
-        name=payload.name,
+        full_name=payload.full_name,
         email=normalized_email,
         password_hash=hash_password(payload.password),
         role=payload.role,
-        active=payload.active,
+        is_active=payload.is_active,
     )
     db.add(user)
     db.commit()
@@ -78,7 +78,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
-    if not user.active:
+    if not user.is_active:
         raise HTTPException(status_code=403, detail="User is inactive")
 
     access_token = create_access_token(user.id, user.role)
@@ -111,7 +111,7 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenResp
         raise HTTPException(status_code=401, detail="Refresh token expired")
 
     user = db.get(User, user_id)
-    if not user or not user.active:
+    if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User is not active")
 
     token_record.revoked_at = datetime.now(timezone.utc)

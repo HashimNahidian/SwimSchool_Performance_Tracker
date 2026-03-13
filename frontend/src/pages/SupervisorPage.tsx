@@ -3,18 +3,16 @@ import { useAuth } from "../auth";
 import {
   createSupervisorEvaluation,
   getSupervisorEvaluationDetail,
-  listLevels,
-  listSkills,
   listSupervisorEvaluations,
-  listUsers,
-  resolveSupervisorTemplate,
+  listSupervisorInstructors,
+  listSupervisorLevels,
+  listSupervisorSkillAttributes,
+  listSupervisorSkills,
 } from "../api";
-import type { EvaluationDetail, EvaluationSummary, Level, Skill, TemplateResolved, User } from "../types";
+import type { Attribute, EvaluationDetail, EvaluationSummary, Level, Skill, User } from "../types";
 import { EvaluationTable } from "../components/EvaluationTable";
 import { EvaluationReportModal } from "../components/EvaluationReport";
 import { EvaluationEditModal } from "../components/EvaluationEditModal";
-import { DEMO_EVALUATIONS, DEMO_LEVELS, DEMO_SKILLS, DEMO_USERS } from "../mockData";
-
 export function SupervisorPage() {
   const { token, user } = useAuth();
   const [error, setError] = useState("");
@@ -23,7 +21,6 @@ export function SupervisorPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
   const [showCreate, setShowCreate] = useState(false);
-  const [isDemo, setIsDemo] = useState(false);
 
   const [reportEval, setReportEval] = useState<EvaluationDetail | null>(null);
   const [editEval, setEditEval] = useState<EvaluationDetail | null>(null);
@@ -31,61 +28,24 @@ export function SupervisorPage() {
 
   useEffect(() => {
     if (!token) return;
-    Promise.all([listUsers(token), listLevels(token), listSkills(token), listSupervisorEvaluations(token)])
+    Promise.all([listSupervisorInstructors(token), listSupervisorLevels(token), listSupervisorSkills(token), listSupervisorEvaluations(token)])
       .then(([u, l, s, e]) => {
-        setUsers(u.filter((x) => x.role === "INSTRUCTOR"));
+        setUsers(u);
         setLevels(l);
         setSkills(s);
-        if (e.length === 0) {
-          setEvaluations(DEMO_EVALUATIONS.filter((ev) => ev.supervisor_id === 201));
-          setIsDemo(true);
-        } else {
-          setEvaluations(e);
-          setIsDemo(false);
-        }
+        setEvaluations(e);
       })
-      .catch((e: Error) => {
-        setError(e.message);
-        setUsers(DEMO_USERS.filter((x) => x.role === "INSTRUCTOR"));
-        setLevels(DEMO_LEVELS);
-        setSkills(DEMO_SKILLS);
-        setEvaluations(DEMO_EVALUATIONS.filter((ev) => ev.supervisor_id === 201));
-        setIsDemo(true);
-      });
+      .catch((e: Error) => setError(e.message));
   }, [token]);
 
   function refreshEvaluations() {
     if (!token) return;
     listSupervisorEvaluations(token)
-      .then((e) => {
-        if (e.length === 0) {
-          setEvaluations(DEMO_EVALUATIONS.filter((ev) => ev.supervisor_id === 201));
-          setIsDemo(true);
-        } else {
-          setEvaluations(e);
-          setIsDemo(false);
-        }
-      })
+      .then((e) => setEvaluations(e))
       .catch((e: Error) => setError(e.message));
   }
 
   async function openDetail(id: number, mode: "view" | "edit") {
-    if (isDemo) {
-      const found = DEMO_EVALUATIONS.find((e) => e.id === id);
-      if (found) {
-        const detail: EvaluationDetail = {
-          ...found,
-          notes: "Demo evaluation - no live data.",
-          ratings: [
-            { attribute_id: 1, attribute_name: "Water Safety", rating_value: 2 },
-            { attribute_id: 2, attribute_name: "Stroke Technique", rating_value: 2 },
-            { attribute_id: 3, attribute_name: "Communication", rating_value: 2 },
-          ],
-        };
-        mode === "view" ? setReportEval(detail) : setEditEval(detail);
-      }
-      return;
-    }
     if (!token) return;
     setLoadingDetail(true);
     try {
@@ -104,11 +64,7 @@ export function SupervisorPage() {
   }
 
   function handleSubmitted(updated: EvaluationDetail) {
-    setEvaluations((prev) =>
-      prev.map((e) =>
-        e.id === updated.id ? { ...e, status: "SUBMITTED", submitted_at: updated.submitted_at } : e
-      )
-    );
+    setEvaluations((prev) => prev.map((e) => (e.id === updated.id ? { ...e } : e)));
     setEditEval(null);
   }
 
@@ -125,8 +81,8 @@ export function SupervisorPage() {
 
   const allRows = useMemo(() => {
     return [...evaluations].sort((a, b) => {
-      const dateA = a.session_date ? new Date(a.session_date + "T00:00:00").getTime() : 0;
-      const dateB = b.session_date ? new Date(b.session_date + "T00:00:00").getTime() : 0;
+      const dateA = new Date(a.created_at).getTime();
+      const dateB = new Date(b.created_at).getTime();
       if (dateA !== dateB) return dateB - dateA;
       return b.id - a.id;
     });
@@ -138,15 +94,8 @@ export function SupervisorPage() {
     <>
       {error && <p className="error">{error}</p>}
 
-      {isDemo && (
-        <div className="demo-banner">
-          <span>Demo mode</span>
-          <span>Showing sample data. Connect to the API to see live evaluations.</span>
-        </div>
-      )}
-
       <div className="page-heading">
-        <h1 className="page-title">Welcome back, {user?.name ?? "Supervisor"}</h1>
+        <h1 className="page-title">Welcome back, {user?.full_name ?? "Supervisor"}</h1>
         <p className="page-subtitle">Manage and track instructor evaluations across all swim levels.</p>
       </div>
 
@@ -211,6 +160,14 @@ export function SupervisorPage() {
   );
 }
 
+const RATING_LABEL: Record<number, string> = {
+  1: "1 - Does not meet Standards",
+  2: "2 - Needs Improvement",
+  3: "3 - Meets Standard",
+  4: "4 - Exceeds Standard",
+  5: "5 - Outstanding",
+};
+
 function SupervisorCreateEvaluation({
   token,
   users,
@@ -227,10 +184,9 @@ function SupervisorCreateEvaluation({
   const [instructorId, setInstructorId] = useState<number>(users[0]?.id ?? 0);
   const [levelId, setLevelId] = useState<number>(levels[0]?.id ?? 0);
   const [skillId, setSkillId] = useState<number>(0);
-  const [sessionLabel, setSessionLabel] = useState("");
-  const [sessionDate, setSessionDate] = useState("");
   const [notes, setNotes] = useState("");
-  const [criteria, setCriteria] = useState<TemplateResolved["attributes"]>([]);
+  const [error, setError] = useState("");
+  const [attributes, setAttributes] = useState<Attribute[]>([]);
   const [ratings, setRatings] = useState<Record<number, number>>({});
   const levelSkills = useMemo(() => skills.filter((x) => x.level_id === levelId), [skills, levelId]);
 
@@ -247,41 +203,38 @@ function SupervisorCreateEvaluation({
   }, [levelSkills]);
 
   useEffect(() => {
-    if (!levelId || !skillId) {
-      setCriteria([]);
-      setRatings({});
-      return;
-    }
-
-    resolveSupervisorTemplate(token, levelId, skillId)
-      .then((tmpl) => {
-        setCriteria(tmpl.attributes);
-        const nextRatings: Record<number, number> = {};
-        for (const item of tmpl.attributes) nextRatings[item.attribute_id] = 2;
-        setRatings(nextRatings);
+    if (!skillId) return;
+    listSupervisorSkillAttributes(token, skillId)
+      .then((attrs) => {
+        setAttributes(attrs);
+        const defaults: Record<number, number> = {};
+        for (const a of attrs) defaults[a.id] = 3;
+        setRatings(defaults);
       })
       .catch(() => {
-        setCriteria([]);
+        setAttributes([]);
         setRatings({});
       });
-  }, [token, levelId, skillId]);
+  }, [skillId, token]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    await createSupervisorEvaluation(token, {
-      instructor_id: instructorId,
-      level_id: levelId,
-      skill_id: skillId,
-      session_label: sessionLabel,
-      session_date: sessionDate,
-      notes,
-      ratings: criteria.map((c) => ({ attribute_id: c.attribute_id, rating_value: ratings[c.attribute_id] ?? 2 })),
-    });
-
-    setSessionLabel("");
-    setSessionDate("");
-    setNotes("");
-    onCreated();
+    setError("");
+    try {
+      await createSupervisorEvaluation(token, {
+        instructor_id: instructorId,
+        skill_id: skillId,
+        notes: notes.trim() || undefined,
+        ratings: Object.entries(ratings).map(([id, value]) => ({
+          attribute_id: Number(id),
+          rating: value,
+        })),
+      });
+      setNotes("");
+      onCreated();
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
 
   return (
@@ -293,7 +246,7 @@ function SupervisorCreateEvaluation({
           <select value={instructorId} onChange={(e) => setInstructorId(Number(e.target.value))}>
             {users.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.name}
+                {u.full_name}
               </option>
             ))}
           </select>
@@ -321,20 +274,28 @@ function SupervisorCreateEvaluation({
           </select>
         </label>
 
-        <label>
-          Session Label
-          <input
-            value={sessionLabel}
-            onChange={(e) => setSessionLabel(e.target.value)}
-            placeholder="e.g. Morning Lanes A"
-            required
-          />
-        </label>
-
-        <label>
-          Session Date
-          <input type="date" value={sessionDate} onChange={(e) => setSessionDate(e.target.value)} required />
-        </label>
+        {attributes.length > 0 && (
+          <fieldset className="edit-ratings-fieldset">
+            <legend style={{ fontWeight: 700, color: "#023e8a", padding: "0 6px" }}>
+              Performance Ratings
+            </legend>
+            {attributes.map((attr) => (
+              <label key={attr.id} className="inline-rating edit-rating-row">
+                <span className="edit-rating-label">{attr.name}</span>
+                <select
+                  value={ratings[attr.id] ?? 3}
+                  onChange={(e) =>
+                    setRatings((prev) => ({ ...prev, [attr.id]: Number(e.target.value) }))
+                  }
+                >
+                  {[1, 2, 3, 4, 5].map((v) => (
+                    <option key={v} value={v}>{RATING_LABEL[v]}</option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </fieldset>
+        )}
 
         <label>
           Notes
@@ -345,28 +306,8 @@ function SupervisorCreateEvaluation({
           />
         </label>
 
-        <fieldset style={{ padding: 12, borderRadius: 8, border: "1px solid #bbd6ea" }}>
-          <legend style={{ fontWeight: 700, color: "#023e8a", padding: "0 6px" }}>Performance Ratings</legend>
-          <p style={{ fontSize: 13, color: "#64748b", marginBottom: 10 }}>
-            1 = Remediate | 2 = Meets Standard | 3 = Exceeds Standard
-          </p>
-          {criteria.map((c) => (
-            <label key={c.attribute_id} className="inline-rating">
-              <span>{c.attribute_name}</span>
-              <select
-                value={ratings[c.attribute_id] ?? 2}
-                onChange={(e) => setRatings((p) => ({ ...p, [c.attribute_id]: Number(e.target.value) }))}
-              >
-                <option value={1}>1 - Remediate</option>
-                <option value={2}>2 - Meets Standard</option>
-                <option value={3}>3 - Exceeds Standard</option>
-              </select>
-            </label>
-          ))}
-          {criteria.length === 0 && <p className="error">No template criteria found for selected level / skill.</p>}
-        </fieldset>
-
-        <button type="submit" disabled={criteria.length === 0}>Save Draft</button>
+        {error && <p className="error">{error}</p>}
+        <button type="submit" disabled={levelSkills.length === 0}>Create Evaluation</button>
       </form>
     </div>
   );

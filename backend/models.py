@@ -1,14 +1,14 @@
 import enum
-from datetime import date, datetime
+from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
-    Date,
     DateTime,
     Enum,
     ForeignKey,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -25,32 +25,28 @@ class UserRole(str, enum.Enum):
     INSTRUCTOR = "INSTRUCTOR"
 
 
-class EvaluationStatus(str, enum.Enum):
-    DRAFT = "DRAFT"
-    SUBMITTED = "SUBMITTED"
-
-
 class School(Base):
     __tablename__ = "schools"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    name: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("school_id", "email", name="uq_users_school_email"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     phone: Mapped[str | None] = mapped_column(String(25))
     password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), nullable=False)
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
     school: Mapped["School"] = relationship()
 
 
@@ -59,9 +55,11 @@ class Level(Base):
     __table_args__ = (UniqueConstraint("school_id", "name", name="uq_levels_school_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
     school: Mapped["School"] = relationship()
 
 
@@ -70,88 +68,61 @@ class Skill(Base):
     __table_args__ = (UniqueConstraint("level_id", "name", name="uq_skills_level_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True)
-    level_id: Mapped[int] = mapped_column(ForeignKey("levels.id", ondelete="RESTRICT"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    level_id: Mapped[int] = mapped_column(ForeignKey("levels.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     level: Mapped["Level"] = relationship()
-    school: Mapped["School"] = relationship()
+    skill_attributes: Mapped[list["SkillAttribute"]] = relationship(
+        back_populates="skill", cascade="all, delete-orphan"
+    )
 
 
 class Attribute(Base):
     __tablename__ = "attributes"
+    __table_args__ = (UniqueConstraint("school_id", "name", name="uq_attributes_school_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
-    description: Mapped[str | None] = mapped_column(String(500))
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-
-
-class Template(Base):
-    __tablename__ = "templates"
-    __table_args__ = (UniqueConstraint("school_id", "name", "level_id", "skill_id", name="uq_templates_name_scope"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(160), nullable=False)
-    level_id: Mapped[int | None] = mapped_column(ForeignKey("levels.id", ondelete="SET NULL"), index=True)
-    skill_id: Mapped[int | None] = mapped_column(ForeignKey("skills.id", ondelete="SET NULL"), index=True)
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     school: Mapped["School"] = relationship()
-    level: Mapped["Level | None"] = relationship()
-    skill: Mapped["Skill | None"] = relationship()
-    template_attributes: Mapped[list["TemplateAttribute"]] = relationship(
-        back_populates="template", cascade="all, delete-orphan"
-    )
 
 
-class TemplateAttribute(Base):
-    __tablename__ = "template_attributes"
-    __table_args__ = (
-        UniqueConstraint("template_id", "attribute_id", name="uq_template_attribute"),
-        UniqueConstraint("template_id", "sort_order", name="uq_template_sort"),
-    )
+class SkillAttribute(Base):
+    __tablename__ = "skill_attributes"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    template_id: Mapped[int] = mapped_column(ForeignKey("templates.id", ondelete="CASCADE"), nullable=False, index=True)
-    attribute_id: Mapped[int] = mapped_column(ForeignKey("attributes.id", ondelete="RESTRICT"), nullable=False, index=True)
-    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    skill_id: Mapped[int] = mapped_column(ForeignKey("skills.id", ondelete="CASCADE"), primary_key=True)
+    attribute_id: Mapped[int] = mapped_column(ForeignKey("attributes.id", ondelete="CASCADE"), primary_key=True)
 
-    template: Mapped["Template"] = relationship(back_populates="template_attributes")
+    skill: Mapped["Skill"] = relationship(back_populates="skill_attributes")
     attribute: Mapped["Attribute"] = relationship()
 
 
 class Evaluation(Base):
     __tablename__ = "evaluations"
+    __table_args__ = (
+        CheckConstraint("instructor_id <> supervisor_id", name="chk_different_users"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True)
+    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
     instructor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
     supervisor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
-    level_id: Mapped[int] = mapped_column(ForeignKey("levels.id", ondelete="RESTRICT"), nullable=False, index=True)
-    skill_id: Mapped[int] = mapped_column(ForeignKey("skills.id", ondelete="RESTRICT"), nullable=False, index=True)
-    template_id: Mapped[int | None] = mapped_column(ForeignKey("templates.id", ondelete="SET NULL"), index=True)
-    session_label: Mapped[str] = mapped_column(String(150), nullable=False)
-    session_date: Mapped[date] = mapped_column(Date, nullable=False)
+    skill_id: Mapped[int] = mapped_column(ForeignKey("skills.id"), nullable=False, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[EvaluationStatus] = mapped_column(
-        Enum(EvaluationStatus, name="evaluation_status"),
-        nullable=False,
-        default=EvaluationStatus.DRAFT,
-        server_default=EvaluationStatus.DRAFT.value,
-    )
+    final_grade: Mapped[int | None] = mapped_column(SmallInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     school: Mapped["School"] = relationship()
     instructor: Mapped["User"] = relationship(foreign_keys=[instructor_id])
     supervisor: Mapped["User"] = relationship(foreign_keys=[supervisor_id])
-    level: Mapped["Level"] = relationship()
     skill: Mapped["Skill"] = relationship()
-    template: Mapped["Template | None"] = relationship()
     ratings: Mapped[list["EvaluationRating"]] = relationship(
         back_populates="evaluation", cascade="all, delete-orphan"
     )
@@ -161,13 +132,16 @@ class EvaluationRating(Base):
     __tablename__ = "evaluation_ratings"
     __table_args__ = (
         UniqueConstraint("evaluation_id", "attribute_id", name="uq_evaluation_attribute"),
-        CheckConstraint("rating_value BETWEEN 1 AND 3", name="ck_rating_value_range"),
+        CheckConstraint("rating BETWEEN 1 AND 5", name="ck_rating_range"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    evaluation_id: Mapped[int] = mapped_column(ForeignKey("evaluations.id", ondelete="CASCADE"), nullable=False, index=True)
-    attribute_id: Mapped[int] = mapped_column(ForeignKey("attributes.id", ondelete="RESTRICT"), nullable=False, index=True)
-    rating_value: Mapped[int] = mapped_column(Integer, nullable=False)
+    evaluation_id: Mapped[int] = mapped_column(
+        ForeignKey("evaluations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attribute_id: Mapped[int] = mapped_column(ForeignKey("attributes.id"), nullable=False)
+    rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
 
     evaluation: Mapped["Evaluation"] = relationship(back_populates="ratings")
     attribute: Mapped["Attribute"] = relationship()

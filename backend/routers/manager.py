@@ -1,12 +1,12 @@
-from datetime import date
 import logging
 import smtplib
+from datetime import date
 from email.message import EmailMessage
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import asc, desc, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import and_, asc, desc, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from config import settings
 from db import get_db
@@ -15,31 +15,29 @@ from models import (
     Attribute,
     Evaluation,
     EvaluationRating,
-    EvaluationStatus,
     Level,
     Skill,
-    Template,
-    TemplateAttribute,
+    SkillAttribute,
     User,
     UserRole,
 )
 from schemas import (
+    AttributeCreate,
     AttributeOut,
+    AttributeUpdate,
     EvaluationDetailOut,
     EvaluationSummaryOut,
     EvaluationUpdate,
     LevelBase,
     LevelOut,
     LevelUpdate,
+    SkillAttributeIn,
     SkillBase,
     SkillOut,
     SkillUpdate,
-    TemplateCreate,
-    TemplateOut,
-    TemplateUpdate,
     UserCreate,
-    UserUpdate,
     UserOut,
+    UserUpdate,
     ExportEmailRequest,
 )
 from security import hash_password
@@ -49,8 +47,6 @@ from services import (
     evaluation_summary_row,
     evaluations_to_csv,
     sync_ratings,
-    template_attributes_replace,
-    template_out,
 )
 
 
@@ -64,10 +60,8 @@ def apply_evaluation_filters(
     *,
     instructor_id: int | None = None,
     supervisor_id: int | None = None,
-    level_id: int | None = None,
     skill_id: int | None = None,
-    rating_value: int | None = None,
-    status_filter: EvaluationStatus | None = None,
+    final_grade: int | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
 ):
@@ -76,22 +70,16 @@ def apply_evaluation_filters(
         filters.append(Evaluation.instructor_id == instructor_id)
     if supervisor_id:
         filters.append(Evaluation.supervisor_id == supervisor_id)
-    if level_id:
-        filters.append(Evaluation.level_id == level_id)
     if skill_id:
         filters.append(Evaluation.skill_id == skill_id)
-    if rating_value is not None:
-        rating_subq = select(EvaluationRating.evaluation_id).where(
-            EvaluationRating.rating_value == rating_value
-        )
-        filters.append(Evaluation.id.in_(rating_subq))
-    if status_filter:
-        filters.append(Evaluation.status == status_filter)
+    if final_grade is not None:
+        filters.append(Evaluation.final_grade == final_grade)
     if date_from:
-        filters.append(Evaluation.session_date >= date_from)
+        filters.append(Evaluation.created_at >= date_from)
     if date_to:
-        filters.append(Evaluation.session_date <= date_to)
+        filters.append(Evaluation.created_at <= date_to)
     if filters:
+        from sqlalchemy import and_
         stmt = stmt.where(and_(*filters))
     return stmt
 
@@ -99,19 +87,19 @@ def apply_evaluation_filters(
 def apply_evaluation_sorting(stmt, *, sort_by: str, sort_dir: str):
     sortable = {
         "id": Evaluation.id,
-        "session_date": Evaluation.session_date,
-        "submitted_at": Evaluation.submitted_at,
+        "created_at": Evaluation.created_at,
+        "updated_at": Evaluation.updated_at,
         "instructor_id": Evaluation.instructor_id,
         "supervisor_id": Evaluation.supervisor_id,
-        "level_id": Evaluation.level_id,
         "skill_id": Evaluation.skill_id,
+        "final_grade": Evaluation.final_grade,
     }
     if sort_by not in sortable:
         raise HTTPException(status_code=400, detail="Invalid sort_by")
     if sort_dir not in {"asc", "desc"}:
         raise HTTPException(status_code=400, detail="Invalid sort_dir")
     order_col = sortable[sort_by]
-    return stmt.order_by(asc(order_col) if sort_dir == "asc" else desc(order_col), desc(Evaluation.id))
+    return stmt.order_by(None).order_by(asc(order_col) if sort_dir == "asc" else desc(order_col), desc(Evaluation.id))
 
 
 def send_csv_email(recipients: list[str], subject: str, message: str, csv_text: str) -> None:
@@ -143,13 +131,15 @@ def send_csv_email(recipients: list[str], subject: str, message: str, csv_text: 
         raise HTTPException(status_code=500, detail="Failed to send email") from exc
 
 
+# ── Users ─────────────────────────────────────────────────────────────────────
+
 @router.get("/users", response_model=list[UserOut], dependencies=[manager_guard])
 def list_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> list[User]:
     return db.scalars(
-        select(User).where(User.school_id == current_user.school_id).order_by(User.name.asc())
+        select(User).where(User.school_id == current_user.school_id).order_by(User.full_name.asc())
     ).all()
 
 
@@ -169,12 +159,12 @@ def create_user(
         raise HTTPException(status_code=400, detail="Email already exists")
     user = User(
         school_id=current_user.school_id,
-        name=payload.name,
+        full_name=payload.full_name,
         email=normalized_email,
         phone=payload.phone.strip() if payload.phone else None,
         password_hash=hash_password(payload.password),
         role=payload.role,
-        active=payload.active,
+        is_active=payload.is_active,
     )
     db.add(user)
     db.commit()
@@ -241,13 +231,15 @@ def delete_user(
         ) from exc
 
 
+# ── Levels ────────────────────────────────────────────────────────────────────
+
 @router.get("/levels", response_model=list[LevelOut], dependencies=[manager_guard])
 def list_levels(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> list[Level]:
     return db.scalars(
-        select(Level).where(Level.school_id == current_user.school_id).order_by(Level.name.asc())
+        select(Level).where(Level.school_id == current_user.school_id).order_by(Level.sort_order.asc(), Level.name.asc())
     ).all()
 
 
@@ -257,7 +249,7 @@ def create_level(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> Level:
-    level = Level(school_id=current_user.school_id, name=payload.name.strip(), active=payload.active)
+    level = Level(school_id=current_user.school_id, name=payload.name.strip(), sort_order=payload.sort_order)
     db.add(level)
     db.commit()
     db.refresh(level)
@@ -301,21 +293,22 @@ def delete_level(
         ) from exc
 
 
+# ── Skills ────────────────────────────────────────────────────────────────────
+
 @router.get("/skills", response_model=list[SkillOut], dependencies=[manager_guard])
 def list_skills(
     level_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> list[Skill]:
-    stmt = select(Skill).where(Skill.school_id == current_user.school_id)
+    stmt = (
+        select(Skill)
+        .join(Level, Skill.level_id == Level.id)
+        .where(Level.school_id == current_user.school_id)
+    )
     if level_id:
         stmt = stmt.where(Skill.level_id == level_id)
-    return db.scalars(stmt.order_by(Skill.name.asc())).all()
-
-
-@router.get("/attributes", response_model=list[AttributeOut], dependencies=[manager_guard])
-def list_attributes(db: Session = Depends(get_db)) -> list[Attribute]:
-    return db.scalars(select(Attribute).where(Attribute.active.is_(True)).order_by(Attribute.name.asc())).all()
+    return db.scalars(stmt.order_by(Skill.sort_order.asc(), Skill.name.asc())).all()
 
 
 @router.post("/skills", response_model=SkillOut, dependencies=[manager_guard])
@@ -328,11 +321,9 @@ def create_skill(
     if not level:
         raise HTTPException(status_code=404, detail="Level not found")
     skill = Skill(
-        school_id=current_user.school_id,
         level_id=payload.level_id,
         name=payload.name.strip(),
-        description=payload.description,
-        active=payload.active,
+        sort_order=payload.sort_order,
     )
     db.add(skill)
     db.commit()
@@ -347,7 +338,11 @@ def update_skill(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> Skill:
-    skill = db.scalar(select(Skill).where(Skill.id == skill_id, Skill.school_id == current_user.school_id))
+    skill = db.scalar(
+        select(Skill)
+        .join(Level, Skill.level_id == Level.id)
+        .where(Skill.id == skill_id, Level.school_id == current_user.school_id)
+    )
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     updates = payload.model_dump(exclude_unset=True)
@@ -368,7 +363,11 @@ def delete_skill(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> None:
-    skill = db.scalar(select(Skill).where(Skill.id == skill_id, Skill.school_id == current_user.school_id))
+    skill = db.scalar(
+        select(Skill)
+        .join(Level, Skill.level_id == Level.id)
+        .where(Skill.id == skill_id, Level.school_id == current_user.school_id)
+    )
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     try:
@@ -378,81 +377,168 @@ def delete_skill(
         db.rollback()
         raise HTTPException(
             status_code=400,
-            detail="Skill cannot be deleted because it is referenced by existing evaluations or templates",
+            detail="Skill cannot be deleted because it is referenced by existing evaluations",
         ) from exc
 
 
-@router.get("/templates", response_model=list[TemplateOut], dependencies=[manager_guard])
-def list_templates(
+# ── Skill ↔ Attribute links ───────────────────────────────────────────────────
+
+@router.get("/skills/{skill_id}/attributes", response_model=list[AttributeOut], dependencies=[manager_guard])
+def list_skill_attributes(
+    skill_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
-) -> list[TemplateOut]:
-    templates = db.scalars(
-        select(Template)
-        .where(Template.school_id == current_user.school_id)
-        .options(selectinload(Template.template_attributes).joinedload(TemplateAttribute.attribute))
-        .order_by(Template.name.asc())
+) -> list[Attribute]:
+    skill = db.scalar(
+        select(Skill)
+        .join(Level, Skill.level_id == Level.id)
+        .where(Skill.id == skill_id, Level.school_id == current_user.school_id)
+    )
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return db.scalars(
+        select(Attribute)
+        .join(SkillAttribute, Attribute.id == SkillAttribute.attribute_id)
+        .where(SkillAttribute.skill_id == skill_id)
+        .order_by(Attribute.sort_order.asc(), Attribute.name.asc())
     ).all()
-    return [template_out(template) for template in templates]
 
 
-@router.post("/templates", response_model=TemplateOut, dependencies=[manager_guard])
-def create_template(
-    payload: TemplateCreate,
+@router.post("/skills/{skill_id}/attributes", status_code=204, dependencies=[manager_guard])
+def add_skill_attribute(
+    skill_id: int,
+    payload: SkillAttributeIn,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
-) -> TemplateOut:
-    if payload.level_id and not db.scalar(
-        select(Level).where(Level.id == payload.level_id, Level.school_id == current_user.school_id)
-    ):
-        raise HTTPException(status_code=404, detail="Level not found")
-    if payload.skill_id:
-        skill = db.scalar(select(Skill).where(Skill.id == payload.skill_id, Skill.school_id == current_user.school_id))
-        if not skill:
-            raise HTTPException(status_code=404, detail="Skill not found")
-        if payload.level_id and skill.level_id != payload.level_id:
-            raise HTTPException(status_code=400, detail="Skill does not belong to level")
+) -> None:
+    skill = db.scalar(
+        select(Skill)
+        .join(Level, Skill.level_id == Level.id)
+        .where(Skill.id == skill_id, Level.school_id == current_user.school_id)
+    )
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    attribute = db.scalar(
+        select(Attribute).where(Attribute.id == payload.attribute_id, Attribute.school_id == current_user.school_id)
+    )
+    if not attribute:
+        raise HTTPException(status_code=404, detail="Attribute not found")
+    existing = db.scalar(
+        select(SkillAttribute).where(
+            SkillAttribute.skill_id == skill_id,
+            SkillAttribute.attribute_id == payload.attribute_id,
+        )
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="Attribute already linked to this skill")
+    db.add(SkillAttribute(skill_id=skill_id, attribute_id=payload.attribute_id))
+    db.commit()
 
-    template = Template(
+
+@router.delete("/skills/{skill_id}/attributes/{attribute_id}", status_code=204, dependencies=[manager_guard])
+def remove_skill_attribute(
+    skill_id: int,
+    attribute_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> None:
+    skill = db.scalar(
+        select(Skill)
+        .join(Level, Skill.level_id == Level.id)
+        .where(Skill.id == skill_id, Level.school_id == current_user.school_id)
+    )
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    link = db.scalar(
+        select(SkillAttribute).where(
+            SkillAttribute.skill_id == skill_id,
+            SkillAttribute.attribute_id == attribute_id,
+        )
+    )
+    if not link:
+        raise HTTPException(status_code=404, detail="Attribute not linked to this skill")
+    db.delete(link)
+    db.commit()
+
+
+# ── Attributes ────────────────────────────────────────────────────────────────
+
+@router.get("/attributes", response_model=list[AttributeOut], dependencies=[manager_guard])
+def list_attributes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> list[Attribute]:
+    return db.scalars(
+        select(Attribute)
+        .where(Attribute.school_id == current_user.school_id)
+        .order_by(Attribute.sort_order.asc(), Attribute.name.asc())
+    ).all()
+
+
+@router.post("/attributes", response_model=AttributeOut, dependencies=[manager_guard])
+def create_attribute(
+    payload: AttributeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> Attribute:
+    attribute = Attribute(
         school_id=current_user.school_id,
         name=payload.name.strip(),
-        level_id=payload.level_id,
-        skill_id=payload.skill_id,
-        active=payload.active,
+        description=payload.description,
+        sort_order=payload.sort_order,
     )
-    db.add(template)
-    db.flush()
-    template_attributes_replace(
-        db, template, [(x.attribute_id, x.sort_order) for x in payload.attributes]
-    )
-    db.commit()
-    db.refresh(template)
-    return template_out(template)
+    db.add(attribute)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Attribute name already exists") from exc
+    db.refresh(attribute)
+    return attribute
 
 
-@router.put("/templates/{template_id}", response_model=TemplateOut, dependencies=[manager_guard])
-def update_template(
-    template_id: int,
-    payload: TemplateUpdate,
+@router.put("/attributes/{attribute_id}", response_model=AttributeOut, dependencies=[manager_guard])
+def update_attribute(
+    attribute_id: int,
+    payload: AttributeUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
-) -> TemplateOut:
-    template = db.scalar(
-        select(Template).where(Template.id == template_id, Template.school_id == current_user.school_id)
+) -> Attribute:
+    attribute = db.scalar(
+        select(Attribute).where(Attribute.id == attribute_id, Attribute.school_id == current_user.school_id)
     )
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
-    updates = payload.model_dump(exclude_unset=True, exclude={"attributes"})
-    for field, value in updates.items():
-        setattr(template, field, value)
-    if payload.attributes is not None:
-        template_attributes_replace(
-            db, template, [(x.attribute_id, x.sort_order) for x in payload.attributes]
-        )
+    if not attribute:
+        raise HTTPException(status_code=404, detail="Attribute not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(attribute, field, value)
     db.commit()
-    db.refresh(template)
-    return template_out(template)
+    db.refresh(attribute)
+    return attribute
 
+
+@router.delete("/attributes/{attribute_id}", status_code=204, dependencies=[manager_guard])
+def delete_attribute(
+    attribute_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> None:
+    attribute = db.scalar(
+        select(Attribute).where(Attribute.id == attribute_id, Attribute.school_id == current_user.school_id)
+    )
+    if not attribute:
+        raise HTTPException(status_code=404, detail="Attribute not found")
+    try:
+        db.delete(attribute)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Attribute cannot be deleted because it is referenced by existing ratings",
+        ) from exc
+
+
+# ── Evaluations ───────────────────────────────────────────────────────────────
 
 @router.get("/evaluations/{evaluation_id}", response_model=EvaluationDetailOut, dependencies=[manager_guard])
 def get_evaluation(
@@ -486,7 +572,7 @@ def update_evaluation(
 
     evaluation.notes = payload.notes
     if payload.ratings is not None:
-        sync_ratings(db, evaluation, [(r.attribute_id, r.rating_value) for r in payload.ratings])
+        sync_ratings(db, evaluation, [(r.attribute_id, r.rating, r.comment) for r in payload.ratings])
     db.commit()
 
     full = db.scalar(evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation.id))
@@ -499,13 +585,11 @@ def update_evaluation(
 def list_evaluations(
     instructor_id: int | None = None,
     supervisor_id: int | None = None,
-    level_id: int | None = None,
     skill_id: int | None = None,
-    rating_value: int | None = Query(default=None, ge=1, le=3),
-    status_filter: EvaluationStatus | None = Query(default=None, alias="status"),
+    final_grade: int | None = Query(default=None, ge=1, le=5),
     date_from: date | None = None,
     date_to: date | None = None,
-    sort_by: str = Query(default="submitted_at"),
+    sort_by: str = Query(default="created_at"),
     sort_dir: str = Query(default="desc"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -517,10 +601,8 @@ def list_evaluations(
         stmt,
         instructor_id=instructor_id,
         supervisor_id=supervisor_id,
-        level_id=level_id,
         skill_id=skill_id,
-        rating_value=rating_value,
-        status_filter=status_filter,
+        final_grade=final_grade,
         date_from=date_from,
         date_to=date_to,
     )
@@ -533,13 +615,11 @@ def list_evaluations(
 def export_evaluations_csv(
     instructor_id: int | None = None,
     supervisor_id: int | None = None,
-    level_id: int | None = None,
     skill_id: int | None = None,
-    rating_value: int | None = Query(default=None, ge=1, le=3),
-    status_filter: EvaluationStatus | None = Query(default=None, alias="status"),
+    final_grade: int | None = Query(default=None, ge=1, le=5),
     date_from: date | None = None,
     date_to: date | None = None,
-    sort_by: str = Query(default="submitted_at"),
+    sort_by: str = Query(default="created_at"),
     sort_dir: str = Query(default="desc"),
     limit: int | None = Query(default=None, ge=1, le=200),
     offset: int | None = Query(default=None, ge=0),
@@ -551,10 +631,8 @@ def export_evaluations_csv(
         stmt,
         instructor_id=instructor_id,
         supervisor_id=supervisor_id,
-        level_id=level_id,
         skill_id=skill_id,
-        rating_value=rating_value,
-        status_filter=status_filter,
+        final_grade=final_grade,
         date_from=date_from,
         date_to=date_to,
     )
@@ -582,16 +660,14 @@ def email_evaluations_csv(
             stmt,
             instructor_id=filters.instructor_id,
             supervisor_id=filters.supervisor_id,
-            level_id=filters.level_id,
             skill_id=filters.skill_id,
-            rating_value=filters.rating_value,
-            status_filter=filters.status,
+            final_grade=filters.final_grade,
             date_from=filters.date_from,
             date_to=filters.date_to,
         )
         stmt = apply_evaluation_sorting(
             stmt,
-            sort_by=filters.sort_by or "submitted_at",
+            sort_by=filters.sort_by or "created_at",
             sort_dir=filters.sort_dir or "desc",
         )
         if filters.limit is not None:

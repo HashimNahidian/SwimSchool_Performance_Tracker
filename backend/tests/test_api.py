@@ -1,4 +1,3 @@
-from datetime import date, datetime, timezone
 from pathlib import Path
 import sys
 
@@ -49,7 +48,7 @@ def client(db_session: Session) -> TestClient:
 
 
 def create_school(db: Session, name: str = "Test School") -> models.School:
-    school = models.School(name=name, active=True)
+    school = models.School(name=name)
     db.add(school)
     db.flush()
     return school
@@ -64,11 +63,11 @@ def create_user(
 ) -> models.User:
     user = models.User(
         school_id=school_id,
-        name=name,
+        full_name=name,
         email=email,
         password_hash=hash_password("TestPass123!"),
         role=role,
-        active=True,
+        is_active=True,
     )
     db.add(user)
     db.commit()
@@ -101,11 +100,11 @@ def test_manager_only_endpoint_rejects_supervisor(client: TestClient, db_session
     create_user(db_session, "Supervisor", "supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
 
     supervisor_headers = auth_headers(client, "supervisor@test.local")
-    response = client.post("/manager/levels", headers=supervisor_headers, json={"name": "Beginner", "active": True})
+    response = client.post("/manager/levels", headers=supervisor_headers, json={"name": "Beginner"})
     assert response.status_code == 403
 
     manager_headers = auth_headers(client, "manager@test.local")
-    success = client.post("/manager/levels", headers=manager_headers, json={"name": "Beginner", "active": True})
+    success = client.post("/manager/levels", headers=manager_headers, json={"name": "Beginner"})
     assert success.status_code == 200
 
 
@@ -130,53 +129,38 @@ def test_supervisor_submit_flow_and_instructor_visibility(client: TestClient, db
     instructor = create_user(db_session, "Instructor", "instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
     create_user(db_session, "Other Instructor", "other@test.local", models.UserRole.INSTRUCTOR, school.id)
 
-    level = models.Level(school_id=school.id, name="Beginner", active=True)
+    level = models.Level(school_id=school.id, name="Beginner")
     db_session.add(level)
     db_session.flush()
-    skill = models.Skill(school_id=school.id, level_id=level.id, name="Freestyle", active=True)
+    skill = models.Skill(level_id=level.id, name="Freestyle")
     db_session.add(skill)
     db_session.flush()
-    attr1 = models.Attribute(name="Safety", description="desc", active=True)
-    attr2 = models.Attribute(name="Technique", description="desc", active=True)
+    attr1 = models.Attribute(school_id=school.id, name="Safety", description="desc")
+    attr2 = models.Attribute(school_id=school.id, name="Technique", description="desc")
     db_session.add_all([attr1, attr2])
     db_session.flush()
-    template = models.Template(
-        school_id=school.id, name="Template A", level_id=level.id, skill_id=skill.id, active=True
-    )
-    db_session.add(template)
-    db_session.flush()
-    db_session.add_all(
-        [
-            models.TemplateAttribute(template_id=template.id, attribute_id=attr1.id, sort_order=1),
-            models.TemplateAttribute(template_id=template.id, attribute_id=attr2.id, sort_order=2),
-        ]
-    )
+    db_session.add_all([
+        models.SkillAttribute(skill_id=skill.id, attribute_id=attr1.id),
+        models.SkillAttribute(skill_id=skill.id, attribute_id=attr2.id),
+    ])
     db_session.commit()
 
     supervisor_headers = auth_headers(client, "supervisor@test.local")
-    draft_response = client.post(
+    create_response = client.post(
         "/supervisor/evaluations",
         headers=supervisor_headers,
         json={
             "instructor_id": instructor.id,
-            "level_id": level.id,
             "skill_id": skill.id,
-            "session_label": "Session A",
-            "session_date": date.today().isoformat(),
-            "notes": "Draft notes",
+            "notes": "Test notes",
             "ratings": [
-                {"attribute_id": attr1.id, "rating_value": 2},
-                {"attribute_id": attr2.id, "rating_value": 3},
+                {"attribute_id": attr1.id, "rating": 2},
+                {"attribute_id": attr2.id, "rating": 3},
             ],
         },
     )
-    assert draft_response.status_code == 200
-    evaluation_id = draft_response.json()["id"]
-    assert draft_response.json()["status"] == "DRAFT"
-
-    submit_response = client.post(f"/supervisor/evaluations/{evaluation_id}/submit", headers=supervisor_headers)
-    assert submit_response.status_code == 200
-    assert submit_response.json()["status"] == "SUBMITTED"
+    assert create_response.status_code == 200
+    evaluation_id = create_response.json()["id"]
 
     instructor_headers = auth_headers(client, "instructor@test.local")
     list_response = client.get("/instructor/evaluations", headers=instructor_headers)
@@ -196,56 +180,39 @@ def test_supervisor_submit_flow_and_instructor_visibility(client: TestClient, db
     assert owner_eval.supervisor_id == supervisor.id
 
 
-def test_submit_rejects_missing_required_template_ratings(client: TestClient, db_session: Session):
+def test_create_evaluation_rejects_attribute_not_linked_to_skill(client: TestClient, db_session: Session):
     school = create_school(db_session)
     create_user(db_session, "Supervisor", "supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
     instructor = create_user(db_session, "Instructor", "instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
 
-    level = models.Level(school_id=school.id, name="Intermediate", active=True)
+    level = models.Level(school_id=school.id, name="Intermediate")
     db_session.add(level)
     db_session.flush()
-    skill = models.Skill(school_id=school.id, level_id=level.id, name="Backstroke", active=True)
+    skill = models.Skill(level_id=level.id, name="Backstroke")
     db_session.add(skill)
     db_session.flush()
-    attr1 = models.Attribute(name="Timing", description="desc", active=True)
-    attr2 = models.Attribute(name="Power", description="desc", active=True)
-    db_session.add_all([attr1, attr2])
+    attr_linked = models.Attribute(school_id=school.id, name="Timing", description="desc")
+    attr_unlinked = models.Attribute(school_id=school.id, name="Power", description="desc")
+    db_session.add_all([attr_linked, attr_unlinked])
     db_session.flush()
-    template = models.Template(
-        school_id=school.id, name="Template B", level_id=level.id, skill_id=skill.id, active=True
-    )
-    db_session.add(template)
-    db_session.flush()
-    db_session.add_all(
-        [
-            models.TemplateAttribute(template_id=template.id, attribute_id=attr1.id, sort_order=1),
-            models.TemplateAttribute(template_id=template.id, attribute_id=attr2.id, sort_order=2),
-        ]
-    )
+    db_session.add(models.SkillAttribute(skill_id=skill.id, attribute_id=attr_linked.id))
     db_session.commit()
 
     supervisor_headers = auth_headers(client, "supervisor@test.local")
-    draft = client.post(
+    response = client.post(
         "/supervisor/evaluations",
         headers=supervisor_headers,
         json={
             "instructor_id": instructor.id,
-            "level_id": level.id,
             "skill_id": skill.id,
-            "session_label": "Session B",
-            "session_date": date.today().isoformat(),
-            "notes": "Partial ratings",
+            "notes": "Test",
             "ratings": [
-                {"attribute_id": attr1.id, "rating_value": 2},
+                {"attribute_id": attr_linked.id, "rating": 3},
+                {"attribute_id": attr_unlinked.id, "rating": 2},
             ],
         },
     )
-    assert draft.status_code == 200
-    evaluation_id = draft.json()["id"]
-
-    submit = client.post(f"/supervisor/evaluations/{evaluation_id}/submit", headers=supervisor_headers)
-    assert submit.status_code == 200
-    assert submit.json()["status"] == "SUBMITTED"
+    assert response.status_code == 400
 
 
 def test_manager_csv_export_returns_data(client: TestClient, db_session: Session):
@@ -254,30 +221,28 @@ def test_manager_csv_export_returns_data(client: TestClient, db_session: Session
     supervisor = create_user(db_session, "Supervisor", "supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
     instructor = create_user(db_session, "Instructor", "instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
 
-    level = models.Level(school_id=school.id, name="Advanced", active=True)
+    level = models.Level(school_id=school.id, name="Advanced")
     db_session.add(level)
     db_session.flush()
-    skill = models.Skill(school_id=school.id, level_id=level.id, name="Butterfly", active=True)
+    skill = models.Skill(level_id=level.id, name="Butterfly")
     db_session.add(skill)
     db_session.flush()
-    attr = models.Attribute(name="Form", description="desc", active=True)
+    attr = models.Attribute(school_id=school.id, name="Form", description="desc")
     db_session.add(attr)
+    db_session.flush()
+    db_session.add(models.SkillAttribute(skill_id=skill.id, attribute_id=attr.id))
     db_session.flush()
 
     evaluation = models.Evaluation(
         school_id=school.id,
         instructor_id=instructor.id,
         supervisor_id=supervisor.id,
-        level_id=level.id,
         skill_id=skill.id,
-        session_label="Export Session",
-        session_date=date.today(),
         notes="Ready for export",
-        status=models.EvaluationStatus.SUBMITTED,
-        submitted_at=datetime.now(timezone.utc),
     )
-    evaluation.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=3)]
     db_session.add(evaluation)
+    db_session.flush()
+    evaluation.ratings = [models.EvaluationRating(attribute_id=attr.id, rating=3)]
     db_session.commit()
 
     manager_headers = auth_headers(client, "manager@test.local")
@@ -286,7 +251,7 @@ def test_manager_csv_export_returns_data(client: TestClient, db_session: Session
     assert "text/csv" in export_response.headers["content-type"]
     body = export_response.text
     assert "evaluation_id" in body
-    assert "Export Session" in body
+    assert "Ready for export" in body
 
 
 def test_manager_evaluations_support_pagination_sort_and_filters(client: TestClient, db_session: Session):
@@ -295,62 +260,55 @@ def test_manager_evaluations_support_pagination_sort_and_filters(client: TestCli
     supervisor = create_user(db_session, "Supervisor", "supervisor2@test.local", models.UserRole.SUPERVISOR, school.id)
     instructor = create_user(db_session, "Instructor", "instructor2@test.local", models.UserRole.INSTRUCTOR, school.id)
 
-    level = models.Level(school_id=school.id, name="Level A", active=True)
+    level = models.Level(school_id=school.id, name="Level A")
     db_session.add(level)
     db_session.flush()
-    skill = models.Skill(school_id=school.id, level_id=level.id, name="Skill A", active=True)
+    skill = models.Skill(level_id=level.id, name="Skill A")
     db_session.add(skill)
     db_session.flush()
-    attr = models.Attribute(name="Attr A", description="desc", active=True)
+    attr = models.Attribute(school_id=school.id, name="Attr A", description="desc")
     db_session.add(attr)
+    db_session.flush()
+    db_session.add(models.SkillAttribute(skill_id=skill.id, attribute_id=attr.id))
     db_session.flush()
 
     ev1 = models.Evaluation(
         school_id=school.id,
         instructor_id=instructor.id,
         supervisor_id=supervisor.id,
-        level_id=level.id,
         skill_id=skill.id,
-        session_label="Eval 1",
-        session_date=date(2026, 1, 10),
         notes="older",
-        status=models.EvaluationStatus.SUBMITTED,
-        submitted_at=datetime.now(timezone.utc),
+        final_grade=2,
     )
-    ev1.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=2)]
     ev2 = models.Evaluation(
         school_id=school.id,
         instructor_id=instructor.id,
         supervisor_id=supervisor.id,
-        level_id=level.id,
         skill_id=skill.id,
-        session_label="Eval 2",
-        session_date=date(2026, 1, 20),
         notes="newer",
-        status=models.EvaluationStatus.DRAFT,
+        final_grade=3,
     )
-    ev2.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=3)]
     db_session.add_all([ev1, ev2])
     db_session.commit()
 
     manager_headers = auth_headers(client, "manager2@test.local")
     response = client.get(
-        "/manager/evaluations?status=SUBMITTED&sort_by=session_date&sort_dir=asc&limit=1&offset=0",
+        "/manager/evaluations?sort_by=final_grade&sort_dir=asc&limit=1&offset=0",
         headers=manager_headers,
     )
     assert response.status_code == 200
     payload = response.json()
     assert len(payload) == 1
-    assert payload[0]["session_label"] == "Eval 1"
+    assert payload[0]["final_grade"] == 2
 
     export = client.get(
-        "/manager/exports/evaluations.csv?status=SUBMITTED&sort_by=session_date&sort_dir=asc",
+        f"/manager/exports/evaluations.csv?sort_by=final_grade&sort_dir=asc",
         headers=manager_headers,
     )
     assert export.status_code == 200
     csv_data = export.text
-    assert "Eval 1" in csv_data
-    assert "Eval 2" not in csv_data
+    assert "older" in csv_data
+    assert "newer" in csv_data
 
 
 def test_instructor_supervisor_filter_and_trends(client: TestClient, db_session: Session):
@@ -360,42 +318,27 @@ def test_instructor_supervisor_filter_and_trends(client: TestClient, db_session:
     supervisor_b = create_user(db_session, "Supervisor B", "supervisorB@test.local", models.UserRole.SUPERVISOR, school.id)
     instructor = create_user(db_session, "Instructor", "instructor3@test.local", models.UserRole.INSTRUCTOR, school.id)
 
-    level = models.Level(school_id=school.id, name="Level Trend", active=True)
+    level = models.Level(school_id=school.id, name="Level Trend")
     db_session.add(level)
     db_session.flush()
-    skill = models.Skill(school_id=school.id, level_id=level.id, name="Skill Trend", active=True)
+    skill = models.Skill(level_id=level.id, name="Skill Trend")
     db_session.add(skill)
-    db_session.flush()
-    attr = models.Attribute(name="Attr Trend", description="desc", active=True)
-    db_session.add(attr)
     db_session.flush()
 
     ev_a = models.Evaluation(
         school_id=school.id,
         instructor_id=instructor.id,
         supervisor_id=supervisor_a.id,
-        level_id=level.id,
         skill_id=skill.id,
-        session_label="Trend A",
-        session_date=date(2026, 2, 1),
         notes="A",
-        status=models.EvaluationStatus.SUBMITTED,
-        submitted_at=datetime.now(timezone.utc),
     )
-    ev_a.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=3)]
     ev_b = models.Evaluation(
         school_id=school.id,
         instructor_id=instructor.id,
         supervisor_id=supervisor_b.id,
-        level_id=level.id,
         skill_id=skill.id,
-        session_label="Trend B",
-        session_date=date(2026, 2, 10),
         notes="B",
-        status=models.EvaluationStatus.SUBMITTED,
-        submitted_at=datetime.now(timezone.utc),
     )
-    ev_b.ratings = [models.EvaluationRating(attribute_id=attr.id, rating_value=1)]
     db_session.add_all([ev_a, ev_b])
     db_session.commit()
 
@@ -404,42 +347,59 @@ def test_instructor_supervisor_filter_and_trends(client: TestClient, db_session:
     assert filtered.status_code == 200
     payload = filtered.json()
     assert len(payload) == 1
-    assert payload[0]["session_label"] == "Trend A"
+    assert payload[0]["supervisor_id"] == supervisor_a.id
 
 
-def test_manager_can_update_template_attributes_and_active_state(client: TestClient, db_session: Session):
+def test_manager_can_manage_skill_attributes(client: TestClient, db_session: Session):
     school = create_school(db_session)
     create_user(db_session, "Manager", "manager4@test.local", models.UserRole.MANAGER, school.id)
-    level = models.Level(school_id=school.id, name="Template Level", active=True)
+    level = models.Level(school_id=school.id, name="Template Level")
     db_session.add(level)
     db_session.flush()
-    skill = models.Skill(school_id=school.id, level_id=level.id, name="Template Skill", active=True)
+    skill = models.Skill(level_id=level.id, name="Template Skill")
     db_session.add(skill)
     db_session.flush()
-    attr_a = models.Attribute(name="Attr T A", description="a", active=True)
-    attr_b = models.Attribute(name="Attr T B", description="b", active=True)
+    attr_a = models.Attribute(school_id=school.id, name="Attr T A", description="a")
+    attr_b = models.Attribute(school_id=school.id, name="Attr T B", description="b")
     db_session.add_all([attr_a, attr_b])
     db_session.flush()
-
-    template = models.Template(
-        school_id=school.id, name="Template To Update", level_id=level.id, skill_id=skill.id, active=True
-    )
-    db_session.add(template)
-    db_session.flush()
-    db_session.add(models.TemplateAttribute(template_id=template.id, attribute_id=attr_a.id, sort_order=1))
+    db_session.add(models.SkillAttribute(skill_id=skill.id, attribute_id=attr_a.id))
     db_session.commit()
 
     headers = auth_headers(client, "manager4@test.local")
-    updated = client.put(
-        f"/manager/templates/{template.id}",
+
+    # Verify only attr_a is linked
+    get_response = client.get(f"/manager/skills/{skill.id}/attributes", headers=headers)
+    assert get_response.status_code == 200
+    linked_ids = [a["id"] for a in get_response.json()]
+    assert attr_a.id in linked_ids
+    assert attr_b.id not in linked_ids
+
+    # Add attr_b
+    add_response = client.post(
+        f"/manager/skills/{skill.id}/attributes",
         headers=headers,
-        json={"active": False, "attributes": [{"attribute_id": attr_b.id, "sort_order": 2}]},
+        json={"attribute_id": attr_b.id},
     )
-    assert updated.status_code == 200
-    payload = updated.json()
-    assert payload["active"] is False
-    assert len(payload["attributes"]) == 1
-    assert payload["attributes"][0]["attribute_id"] == attr_b.id
+    assert add_response.status_code == 204
+
+    # Verify both are linked
+    get_response2 = client.get(f"/manager/skills/{skill.id}/attributes", headers=headers)
+    assert get_response2.status_code == 200
+    linked_ids2 = [a["id"] for a in get_response2.json()]
+    assert attr_a.id in linked_ids2
+    assert attr_b.id in linked_ids2
+
+    # Remove attr_b
+    del_response = client.delete(f"/manager/skills/{skill.id}/attributes/{attr_b.id}", headers=headers)
+    assert del_response.status_code == 204
+
+    # Verify only attr_a remains
+    get_response3 = client.get(f"/manager/skills/{skill.id}/attributes", headers=headers)
+    assert get_response3.status_code == 200
+    linked_ids3 = [a["id"] for a in get_response3.json()]
+    assert attr_a.id in linked_ids3
+    assert attr_b.id not in linked_ids3
 
 
 def test_manager_can_update_user_with_phone(client: TestClient, db_session: Session):
@@ -452,20 +412,20 @@ def test_manager_can_update_user_with_phone(client: TestClient, db_session: Sess
         f"/manager/users/{target.id}",
         headers=headers,
         json={
-            "name": "Coach Updated",
+            "full_name": "Coach Updated",
             "email": "coach.updated@test.local",
             "phone": "555-0102",
             "role": "SUPERVISOR",
-            "active": False,
+            "is_active": False,
         },
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["name"] == "Coach Updated"
+    assert payload["full_name"] == "Coach Updated"
     assert payload["email"] == "coach.updated@test.local"
     assert payload["phone"] == "555-0102"
     assert payload["role"] == "SUPERVISOR"
-    assert payload["active"] is False
+    assert payload["is_active"] is False
 
 
 def test_manager_can_delete_user(client: TestClient, db_session: Session):

@@ -1,20 +1,17 @@
 import csv
 import io
-from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from models import (
     Attribute,
     Evaluation,
     EvaluationRating,
-    EvaluationStatus,
     Level,
     Skill,
-    Template,
-    TemplateAttribute,
+    SkillAttribute,
     User,
     UserRole,
 )
@@ -22,111 +19,81 @@ from schemas import (
     EvaluationDetailOut,
     EvaluationSummaryOut,
     RatingOut,
-    TemplateAttributeOut,
-    TemplateOut,
 )
 
 
 def ensure_user_role(db: Session, user_id: int, expected_role: UserRole, school_id: int) -> User:
     user = db.get(User, user_id)
-    if not user or user.school_id != school_id or user.role != expected_role or not user.active:
+    if not user or user.school_id != school_id or user.role != expected_role or not user.is_active:
         raise HTTPException(status_code=400, detail=f"User {user_id} is not an active {expected_role.value}")
     return user
 
 
-def ensure_level_skill_compatible(db: Session, level_id: int, skill_id: int, school_id: int) -> tuple[Level, Skill]:
-    level = db.get(Level, level_id)
-    skill = db.get(Skill, skill_id)
-    if not level or level.school_id != school_id or not level.active:
-        raise HTTPException(status_code=404, detail="Level not found or inactive")
-    if not skill or skill.school_id != school_id or not skill.active:
-        raise HTTPException(status_code=404, detail="Skill not found or inactive")
-    if skill.level_id != level.id:
-        raise HTTPException(status_code=400, detail="Skill does not belong to level")
-    return level, skill
-
-
-def resolve_template(
-    db: Session, level_id: int, skill_id: int, template_id: int | None, school_id: int
-) -> Template | None:
-    if template_id is not None:
-        template = db.get(Template, template_id)
-        if not template or template.school_id != school_id or not template.active:
-            raise HTTPException(status_code=404, detail="Template not found or inactive")
-        return template
-
-    exact = db.scalar(
-        select(Template).where(
-            and_(
-                Template.school_id == school_id,
-                Template.active.is_(True),
-                Template.level_id == level_id,
-                Template.skill_id == skill_id,
-            )
-        )
+def ensure_skill_in_school(db: Session, skill_id: int, school_id: int) -> Skill:
+    skill = db.scalar(
+        select(Skill)
+        .join(Level, Skill.level_id == Level.id)
+        .where(Skill.id == skill_id, Level.school_id == school_id)
     )
-    if exact:
-        return exact
-
-    fallback = db.scalar(
-        select(Template).where(
-            and_(
-                Template.school_id == school_id,
-                Template.active.is_(True),
-                Template.level_id == level_id,
-                Template.skill_id.is_(None),
-            )
-        )
-    )
-    return fallback
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return skill
 
 
-def sync_ratings(db: Session, evaluation: Evaluation, ratings: list[tuple[int, int]]) -> None:
+def sync_ratings(db: Session, evaluation: Evaluation, ratings: list[tuple[int, int, str | None]]) -> None:
     current = {r.attribute_id: r for r in evaluation.ratings}
-    incoming_ids = {attribute_id for attribute_id, _ in ratings}
+    incoming_ids = {attribute_id for attribute_id, _, _ in ratings}
     if len(incoming_ids) != len(ratings):
         raise HTTPException(status_code=400, detail="Duplicate attribute ratings are not allowed")
 
-    attributes = db.scalars(select(Attribute).where(Attribute.id.in_(incoming_ids))).all() if incoming_ids else []
-    found_ids = {attr.id for attr in attributes}
-    missing = incoming_ids - found_ids
-    if missing:
-        raise HTTPException(status_code=400, detail=f"Unknown attribute ids: {sorted(missing)}")
+    # Validate each attribute is configured for this skill
+    valid_attr_ids = set(
+        db.scalars(
+            select(SkillAttribute.attribute_id).where(SkillAttribute.skill_id == evaluation.skill_id)
+        ).all()
+    )
+    invalid = incoming_ids - valid_attr_ids
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Attribute ids not configured for this skill: {sorted(invalid)}",
+        )
 
-    for attribute_id, value in ratings:
+    for attribute_id, value, comment in ratings:
         existing = current.get(attribute_id)
         if existing:
-            existing.rating_value = value
+            existing.rating = value
+            existing.comment = comment
         else:
-            db.add(EvaluationRating(evaluation_id=evaluation.id, attribute_id=attribute_id, rating_value=value))
+            db.add(
+                EvaluationRating(
+                    evaluation_id=evaluation.id,
+                    attribute_id=attribute_id,
+                    rating=value,
+                    comment=comment,
+                )
+            )
 
     for attribute_id, existing in current.items():
         if attribute_id not in incoming_ids:
             db.delete(existing)
 
 
-def submit_evaluation(evaluation: Evaluation) -> None:
-    if evaluation.status == EvaluationStatus.SUBMITTED:
-        raise HTTPException(status_code=400, detail="Evaluation already submitted")
-    evaluation.status = EvaluationStatus.SUBMITTED
-    evaluation.submitted_at = datetime.now(timezone.utc)
-
-
 def evaluation_summary_row(evaluation: Evaluation) -> EvaluationSummaryOut:
+    level = evaluation.skill.level
     return EvaluationSummaryOut(
         id=evaluation.id,
         instructor_id=evaluation.instructor_id,
-        instructor_name=evaluation.instructor.name,
+        instructor_name=evaluation.instructor.full_name,
         supervisor_id=evaluation.supervisor_id,
-        supervisor_name=evaluation.supervisor.name,
-        level_id=evaluation.level_id,
-        level_name=evaluation.level.name,
+        supervisor_name=evaluation.supervisor.full_name,
+        level_id=level.id,
+        level_name=level.name,
         skill_id=evaluation.skill_id,
         skill_name=evaluation.skill.name,
-        session_label=evaluation.session_label,
-        session_date=evaluation.session_date,
-        status=evaluation.status,
-        submitted_at=evaluation.submitted_at,
+        final_grade=evaluation.final_grade,
+        created_at=evaluation.created_at,
+        updated_at=evaluation.updated_at,
     )
 
 
@@ -138,53 +105,12 @@ def evaluation_detail_row(evaluation: Evaluation) -> EvaluationDetailOut:
             RatingOut(
                 attribute_id=rating.attribute_id,
                 attribute_name=rating.attribute.name,
-                rating_value=rating.rating_value,
+                rating=rating.rating,
+                comment=rating.comment,
             )
-            for rating in sorted(evaluation.ratings, key=lambda x: x.attribute.name.lower())
+            for rating in sorted(evaluation.ratings, key=lambda x: (x.attribute.sort_order, x.attribute.name))
         ],
     )
-
-
-def template_out(template: Template) -> TemplateOut:
-    attrs = [
-        TemplateAttributeOut(
-            attribute_id=item.attribute_id,
-            attribute_name=item.attribute.name,
-            sort_order=item.sort_order,
-        )
-        for item in sorted(template.template_attributes, key=lambda x: x.sort_order)
-    ]
-    return TemplateOut(
-        id=template.id,
-        name=template.name,
-        level_id=template.level_id,
-        skill_id=template.skill_id,
-        active=template.active,
-        attributes=attrs,
-    )
-
-
-def template_attributes_replace(db: Session, template: Template, attributes: list[tuple[int, int]]) -> None:
-    if not attributes:
-        raise HTTPException(status_code=400, detail="Template must contain at least one attribute")
-
-    sort_orders = {order for _, order in attributes}
-    if len(sort_orders) != len(attributes):
-        raise HTTPException(status_code=400, detail="Duplicate sort_order values are not allowed")
-
-    attribute_ids = [attribute_id for attribute_id, _ in attributes]
-    found_ids = set(
-        db.scalars(select(Attribute.id).where(Attribute.id.in_(attribute_ids), Attribute.active.is_(True))).all()
-    )
-    missing = set(attribute_ids) - found_ids
-    if missing:
-        raise HTTPException(status_code=400, detail=f"Inactive or unknown attribute ids: {sorted(missing)}")
-
-    template.template_attributes.clear()
-    for attribute_id, order in attributes:
-        template.template_attributes.append(
-            TemplateAttribute(attribute_id=attribute_id, sort_order=order)
-        )
 
 
 def evaluation_query_with_joins(school_id: int):
@@ -194,11 +120,10 @@ def evaluation_query_with_joins(school_id: int):
         .options(
             joinedload(Evaluation.instructor),
             joinedload(Evaluation.supervisor),
-            joinedload(Evaluation.level),
-            joinedload(Evaluation.skill),
+            joinedload(Evaluation.skill).joinedload(Skill.level),
             selectinload(Evaluation.ratings).joinedload(EvaluationRating.attribute),
         )
-        .order_by(Evaluation.session_date.desc(), Evaluation.id.desc())
+        .order_by(Evaluation.created_at.desc(), Evaluation.id.desc())
     )
 
 
@@ -208,36 +133,37 @@ def evaluations_to_csv(evaluations: list[Evaluation]) -> str:
     writer.writerow(
         [
             "evaluation_id",
-            "session_label",
-            "session_date",
-            "status",
+            "created_at",
+            "updated_at",
             "instructor",
             "supervisor",
             "level",
             "skill",
             "attribute",
-            "rating_value",
+            "rating",
+            "comment",
+            "final_grade",
             "notes",
-            "submitted_at",
         ]
     )
     for evaluation in evaluations:
-        rows = sorted(evaluation.ratings, key=lambda x: x.attribute.name.lower())
+        level = evaluation.skill.level
+        rows = sorted(evaluation.ratings, key=lambda x: (x.attribute.sort_order, x.attribute.name))
         if not rows:
             writer.writerow(
                 [
                     evaluation.id,
-                    evaluation.session_label,
-                    evaluation.session_date.isoformat(),
-                    evaluation.status.value,
-                    evaluation.instructor.name,
-                    evaluation.supervisor.name,
-                    evaluation.level.name,
+                    evaluation.created_at.isoformat(),
+                    evaluation.updated_at.isoformat(),
+                    evaluation.instructor.full_name,
+                    evaluation.supervisor.full_name,
+                    level.name,
                     evaluation.skill.name,
                     "",
                     "",
+                    "",
+                    evaluation.final_grade if evaluation.final_grade is not None else "",
                     evaluation.notes or "",
-                    evaluation.submitted_at.isoformat() if evaluation.submitted_at else "",
                 ]
             )
             continue
@@ -246,17 +172,17 @@ def evaluations_to_csv(evaluations: list[Evaluation]) -> str:
             writer.writerow(
                 [
                     evaluation.id,
-                    evaluation.session_label,
-                    evaluation.session_date.isoformat(),
-                    evaluation.status.value,
-                    evaluation.instructor.name,
-                    evaluation.supervisor.name,
-                    evaluation.level.name,
+                    evaluation.created_at.isoformat(),
+                    evaluation.updated_at.isoformat(),
+                    evaluation.instructor.full_name,
+                    evaluation.supervisor.full_name,
+                    level.name,
                     evaluation.skill.name,
                     rating.attribute.name,
-                    rating.rating_value,
+                    rating.rating,
+                    rating.comment or "",
+                    evaluation.final_grade if evaluation.final_grade is not None else "",
                     evaluation.notes or "",
-                    evaluation.submitted_at.isoformat() if evaluation.submitted_at else "",
                 ]
             )
     return output.getvalue()

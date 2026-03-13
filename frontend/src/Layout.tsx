@@ -45,8 +45,8 @@ export function Layout() {
 
         {user && (
           <div className="topbar-right">
-            <div className="user-avatar">{initials(user.name)}</div>
-            <span className="topbar-user">{user.name}</span>
+            <div className="user-avatar">{initials(user.full_name)}</div>
+            <span className="topbar-user">{user.full_name}</span>
             <button className="signout-btn" onClick={logout}>
               Sign Out
             </button>

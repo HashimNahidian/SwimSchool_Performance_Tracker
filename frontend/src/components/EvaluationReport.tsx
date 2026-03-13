@@ -46,18 +46,16 @@ function ReportContent({ ev }: { ev: EvaluationDetail }) {
           <span className="report-info-value">{ev.skill_name}</span>
         </div>
         <div className="report-info-item">
-          <span className="report-info-label">Session</span>
-          <span className="report-info-value">{ev.session_label}</span>
-        </div>
-        <div className="report-info-item">
           <span className="report-info-label">Date</span>
-          <span className="report-info-value">{ev.session_date}</span>
+          <span className="report-info-value">
+            {new Date(ev.created_at).toLocaleDateString()}
+          </span>
         </div>
-        {ev.submitted_at && (
+        {ev.final_grade != null && (
           <div className="report-info-item">
-            <span className="report-info-label">Submitted At</span>
-            <span className="report-info-value">
-              {new Date(ev.submitted_at).toLocaleString()}
+            <span className="report-info-label">Final Grade</span>
+            <span className="report-info-value" style={{ color: RATING_COLOR[ev.final_grade], fontWeight: 700 }}>
+              {ev.final_grade} — {RATING_LABEL[ev.final_grade] ?? ""}
             </span>
           </div>
         )}
@@ -79,18 +77,20 @@ function ReportContent({ ev }: { ev: EvaluationDetail }) {
                 <th>Criterion</th>
                 <th style={{ width: 80, textAlign: "center" }}>Score</th>
                 <th>Assessment</th>
+                <th>Comment</th>
               </tr>
             </thead>
             <tbody>
               {ev.ratings.map((r) => (
                 <tr key={r.attribute_id}>
                   <td>{r.attribute_name}</td>
-                  <td style={{ textAlign: "center", fontWeight: 800, fontSize: 18, color: RATING_COLOR[r.rating_value] }}>
-                    {r.rating_value}
+                  <td style={{ textAlign: "center", fontWeight: 800, fontSize: 18, color: RATING_COLOR[r.rating] }}>
+                    {r.rating}
                   </td>
-                  <td style={{ color: RATING_COLOR[r.rating_value], fontWeight: 600 }}>
-                    {RATING_LABEL[r.rating_value] ?? "—"}
+                  <td style={{ color: RATING_COLOR[r.rating], fontWeight: 600 }}>
+                    {RATING_LABEL[r.rating] ?? "—"}
                   </td>
+                  <td style={{ color: "#64748b", fontSize: 13 }}>{r.comment ?? "—"}</td>
                 </tr>
               ))}
             </tbody>

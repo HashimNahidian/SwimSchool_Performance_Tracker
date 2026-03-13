@@ -4,8 +4,6 @@ import type {
   EvaluationSummary,
   Level,
   Skill,
-  TemplateConfig,
-  TemplateResolved,
   TokenResponse,
   User
 } from "./types";
@@ -68,12 +66,12 @@ export function listUsers(token: string): Promise<User[]> {
 export function createUser(
   token: string,
   payload: {
-    name: string;
+    full_name: string;
     email: string;
     phone?: string | null;
     password: string;
     role: "MANAGER" | "SUPERVISOR" | "INSTRUCTOR";
-    active: boolean;
+    is_active: boolean;
   }
 ): Promise<User> {
   return request("/manager/users", "POST", payload, token);
@@ -83,11 +81,11 @@ export function updateUser(
   token: string,
   userId: number,
   payload: {
-    name?: string;
+    full_name?: string;
     email?: string;
     phone?: string | null;
     role?: "MANAGER" | "SUPERVISOR" | "INSTRUCTOR";
-    active?: boolean;
+    is_active?: boolean;
     password?: string;
   }
 ): Promise<User> {
@@ -104,7 +102,7 @@ export function listLevels(token: string): Promise<Level[]> {
 
 export function createLevel(
   token: string,
-  payload: { name: string; active: boolean }
+  payload: { name: string; sort_order?: number }
 ): Promise<Level> {
   return request("/manager/levels", "POST", payload, token);
 }
@@ -112,7 +110,7 @@ export function createLevel(
 export function updateLevel(
   token: string,
   levelId: number,
-  payload: { name?: string; active?: boolean }
+  payload: { name?: string; sort_order?: number }
 ): Promise<Level> {
   return request(`/manager/levels/${levelId}`, "PUT", payload, token);
 }
@@ -127,7 +125,7 @@ export function listSkills(token: string): Promise<Skill[]> {
 
 export function createSkill(
   token: string,
-  payload: { level_id: number; name: string; description?: string; active: boolean }
+  payload: { level_id: number; name: string; sort_order?: number }
 ): Promise<Skill> {
   return request("/manager/skills", "POST", payload, token);
 }
@@ -135,7 +133,7 @@ export function createSkill(
 export function updateSkill(
   token: string,
   skillId: number,
-  payload: { level_id?: number; name?: string; description?: string | null; active?: boolean }
+  payload: { level_id?: number; name?: string; sort_order?: number }
 ): Promise<Skill> {
   return request(`/manager/skills/${skillId}`, "PUT", payload, token);
 }
@@ -148,37 +146,6 @@ export function listAttributes(token: string): Promise<Attribute[]> {
   return request("/manager/attributes", "GET", undefined, token);
 }
 
-export function listTemplates(token: string): Promise<TemplateConfig[]> {
-  return request("/manager/templates", "GET", undefined, token);
-}
-
-export function createTemplate(
-  token: string,
-  payload: {
-    name: string;
-    level_id: number;
-    skill_id: number;
-    active: boolean;
-    attributes: Array<{ attribute_id: number; sort_order: number }>;
-  }
-): Promise<TemplateConfig> {
-  return request("/manager/templates", "POST", payload, token);
-}
-
-export function updateTemplate(
-  token: string,
-  templateId: number,
-  payload: {
-    name?: string;
-    level_id?: number | null;
-    skill_id?: number | null;
-    active?: boolean;
-    attributes?: Array<{ attribute_id: number; sort_order: number }>;
-  }
-): Promise<TemplateConfig> {
-  return request(`/manager/templates/${templateId}`, "PUT", payload, token);
-}
-
 export function listManagerEvaluations(token: string): Promise<EvaluationSummary[]> {
   return request("/manager/evaluations", "GET", undefined, token);
 }
@@ -186,13 +153,11 @@ export function listManagerEvaluations(token: string): Promise<EvaluationSummary
 export type ManagerEvaluationQuery = {
   instructor_id?: number;
   supervisor_id?: number;
-  level_id?: number;
   skill_id?: number;
-  rating_value?: number;
-  status?: "DRAFT" | "SUBMITTED";
+  final_grade?: number;
   date_from?: string;
   date_to?: string;
-  sort_by?: "id" | "session_date" | "submitted_at" | "instructor_id" | "supervisor_id" | "level_id" | "skill_id";
+  sort_by?: "id" | "created_at" | "updated_at" | "instructor_id" | "supervisor_id" | "skill_id" | "final_grade";
   sort_dir?: "asc" | "desc";
   limit?: number;
   offset?: number;
@@ -212,6 +177,22 @@ export function listManagerEvaluationsWithQuery(
   return request(`/manager/evaluations${suffix}`, "GET", undefined, token);
 }
 
+export function listSupervisorLevels(token: string): Promise<Level[]> {
+  return request("/supervisor/levels", "GET", undefined, token);
+}
+
+export function listSupervisorSkills(token: string): Promise<Skill[]> {
+  return request("/supervisor/skills", "GET", undefined, token);
+}
+
+export function listSupervisorInstructors(token: string): Promise<User[]> {
+  return request("/supervisor/instructors", "GET", undefined, token);
+}
+
+export function listSupervisorSkillAttributes(token: string, skillId: number): Promise<Attribute[]> {
+  return request(`/supervisor/skills/${skillId}/attributes`, "GET", undefined, token);
+}
+
 export function listSupervisorEvaluations(token: string): Promise<EvaluationSummary[]> {
   return request("/supervisor/evaluations", "GET", undefined, token);
 }
@@ -224,28 +205,12 @@ export function createSupervisorEvaluation(
   token: string,
   payload: {
     instructor_id: number;
-    level_id: number;
     skill_id: number;
-    session_label: string;
-    session_date: string;
     notes?: string;
-    ratings: Array<{ attribute_id: number; rating_value: number }>;
+    ratings: Array<{ attribute_id: number; rating: number; comment?: string | null }>;
   }
-): Promise<unknown> {
+): Promise<EvaluationDetail> {
   return request("/supervisor/evaluations", "POST", payload, token);
-}
-
-export function resolveSupervisorTemplate(
-  token: string,
-  levelId: number,
-  skillId: number
-): Promise<TemplateResolved> {
-  return request(
-    `/supervisor/templates/resolve?level_id=${levelId}&skill_id=${skillId}`,
-    "GET",
-    undefined,
-    token
-  );
 }
 
 export function exportEvaluationsCsvUrl(): string {
@@ -275,13 +240,9 @@ export function getSupervisorEvaluationDetail(token: string, id: number): Promis
 export function updateSupervisorEvaluation(
   token: string,
   id: number,
-  payload: { notes?: string | null; ratings?: Array<{ attribute_id: number; rating_value: number }> }
+  payload: { notes?: string | null; ratings?: Array<{ attribute_id: number; rating: number; comment?: string | null }> }
 ): Promise<EvaluationDetail> {
   return request(`/supervisor/evaluations/${id}`, "PUT", payload, token);
-}
-
-export function submitSupervisorEvaluation(token: string, id: number): Promise<EvaluationDetail> {
-  return request(`/supervisor/evaluations/${id}/submit`, "POST", undefined, token);
 }
 
 export function getManagerEvaluationDetail(token: string, id: number): Promise<EvaluationDetail> {
@@ -291,7 +252,7 @@ export function getManagerEvaluationDetail(token: string, id: number): Promise<E
 export function updateManagerEvaluation(
   token: string,
   id: number,
-  payload: { notes?: string | null; ratings?: Array<{ attribute_id: number; rating_value: number }> }
+  payload: { notes?: string | null; ratings?: Array<{ attribute_id: number; rating: number; comment?: string | null }> }
 ): Promise<EvaluationDetail> {
   return request(`/manager/evaluations/${id}`, "PUT", payload, token);
 }
