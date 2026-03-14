@@ -947,41 +947,6 @@ function ManagerDashboard({
 
   return (
     <>
-      {/* Quick actions */}
-      <div className="card" style={{ padding: "16px 24px" }}>
-        <div className="dash-actions">
-          <button onClick={() => onGo("users")}>👤 Manage Users</button>
-          <button onClick={() => onGo("levels")}>🌊 Levels</button>
-          <button onClick={() => onGo("evaluations")}>📊 All Evaluations</button>
-          <button onClick={onExportCsv}>⬇ Export CSV</button>
-          <button onClick={() => setShowEmail((p) => !p)}>
-            {showEmail ? "✕ Close Email" : "✉ Email CSV"}
-          </button>
-        </div>
-        {showEmail && (
-          <form className="form" onSubmit={onSubmitEmail} style={{ marginTop: 16, marginBottom: 0 }}>
-            <label>
-              To (comma-separated)
-              <input value={toText} onChange={(e) => setToText(e.target.value)} placeholder="coach@propelswim.com" required />
-            </label>
-            <label>
-              Subject
-              <input value={subject} onChange={(e) => setSubject(e.target.value)} />
-            </label>
-            <label>
-              Message
-              <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={3} />
-            </label>
-            <label style={{ flexDirection: "row", alignItems: "center", gap: 8, fontWeight: 400 }}>
-              <input type="checkbox" checked={useCurrentFilters} onChange={(e) => setUseCurrentFilters(e.target.checked)} style={{ width: "auto" }} />
-              Use current filters from All Evaluations
-            </label>
-            <button type="submit" disabled={sending}>{sending ? "Sending..." : "Send"}</button>
-            {emailStatus && <p className={emailStatus === "Email sent." ? "" : "error"}>{emailStatus}</p>}
-          </form>
-        )}
-      </div>
-
       {/* Monthly trend */}
       <div className="card">
         <h2>Monthly Volume</h2>
@@ -1004,15 +969,6 @@ function ManagerDashboard({
           )}
         </div>
 
-        <div className="card">
-          <h2>Stroke & Skill Breakdown</h2>
-          <p className="chart-section-title">Evaluations by skill area</p>
-          {skillData.length > 0 ? (
-            <BarChart data={skillData} />
-          ) : (
-            <p style={{ color: "#64748b", fontSize: 14 }}>No data yet.</p>
-          )}
-        </div>
       </div>
 
       {/* Recent evaluations */}
