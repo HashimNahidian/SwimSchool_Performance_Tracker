@@ -13,6 +13,7 @@ import {
   emailEvaluationsCsv,
   exportEvaluationsCsvUrl,
   getManagerEvaluationDetail,
+  linkSkillAttribute,
   listAttributes,
   listLevels,
   listManagerEvaluationsWithQuery,
@@ -580,15 +581,27 @@ function ManagerLevels({
   // ── Attributes state ──
   const [attrName, setAttrName] = useState("");
   const [attrDesc, setAttrDesc] = useState("");
+  const [attrLevelId, setAttrLevelId] = useState<number>(levels[0]?.id ?? 0);
+  const [attrSkillId, setAttrSkillId] = useState<number>(0);
   const [editingAttrId, setEditingAttrId] = useState<number | null>(null);
   const [editAttrName, setEditAttrName] = useState("");
   const [editAttrDesc, setEditAttrDesc] = useState("");
+
+  const attrLevelSkills = useMemo(() => skills.filter((s) => s.level_id === attrLevelId), [skills, attrLevelId]);
 
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (!skillLevelId && levels.length > 0) setSkillLevelId(levels[0].id);
   }, [skillLevelId, levels]);
+
+  useEffect(() => {
+    if (!attrLevelId && levels.length > 0) setAttrLevelId(levels[0].id);
+  }, [attrLevelId, levels]);
+
+  useEffect(() => {
+    setAttrSkillId(attrLevelSkills[0]?.id ?? 0);
+  }, [attrLevelId, attrLevelSkills]);
 
   // ── Level handlers ──
   async function onCreateLevel(e: FormEvent) {
@@ -668,6 +681,9 @@ function ManagerLevels({
     try {
       setError("");
       const attr = await createAttribute(token, { name: attrName, description: attrDesc.trim() || null });
+      if (attrSkillId) {
+        await linkSkillAttribute(token, attrSkillId, attr.id);
+      }
       onAttributeCreated(attr);
       setAttrName("");
       setAttrDesc("");
@@ -808,7 +824,13 @@ function ManagerLevels({
           <form className="form inline" onSubmit={onCreateAttribute}>
             <input value={attrName} onChange={(e) => setAttrName(e.target.value)} placeholder="Attribute name" required />
             <input value={attrDesc} onChange={(e) => setAttrDesc(e.target.value)} placeholder="Description (optional)" />
-            <button type="submit">Add Attribute</button>
+            <select value={attrLevelId} onChange={(e) => setAttrLevelId(Number(e.target.value))}>
+              {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+            <select value={attrSkillId} onChange={(e) => setAttrSkillId(Number(e.target.value))} disabled={attrLevelSkills.length === 0}>
+              {attrLevelSkills.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <button type="submit" disabled={levels.length === 0 || attrLevelSkills.length === 0}>Add Attribute</button>
           </form>
           <table>
             <thead><tr><th>Name</th><th>Description</th><th>Actions</th></tr></thead>

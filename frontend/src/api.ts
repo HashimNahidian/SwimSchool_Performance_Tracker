@@ -165,6 +165,10 @@ export function deleteAttribute(token: string, attributeId: number): Promise<voi
   return request(`/manager/attributes/${attributeId}`, "DELETE", undefined, token);
 }
 
+export function linkSkillAttribute(token: string, skillId: number, attributeId: number): Promise<void> {
+  return request(`/manager/skills/${skillId}/attributes`, "POST", { attribute_id: attributeId }, token);
+}
+
 export function listManagerEvaluations(token: string): Promise<EvaluationSummary[]> {
   return request("/manager/evaluations", "GET", undefined, token);
 }
