@@ -208,10 +208,20 @@ export function ManagerPage() {
       {tab === "evaluations" && (
         <Section title={`All Evaluations${loadingReport ? " — Loading report…" : ""}`}>
           <form className="form inline" onSubmit={(e) => { e.preventDefault(); setEvaluationsPage(0); setAppliedQuery({ ...buildQuery(filters), limit: EVALUATIONS_PAGE_SIZE, offset: 0 }); }}>
-            <input placeholder="instructor id" value={filters.instructor_id}
-              onChange={(e) => setFilters((p) => ({ ...p, instructor_id: e.target.value }))} />
-            <input placeholder="supervisor id" value={filters.supervisor_id}
-              onChange={(e) => setFilters((p) => ({ ...p, supervisor_id: e.target.value }))} />
+            <select value={filters.instructor_id}
+              onChange={(e) => setFilters((p) => ({ ...p, instructor_id: e.target.value }))}>
+              <option value="">all instructors</option>
+              {users.filter((u) => u.role === "INSTRUCTOR").map((u) => (
+                <option key={u.id} value={u.id}>{u.full_name}</option>
+              ))}
+            </select>
+            <select value={filters.supervisor_id}
+              onChange={(e) => setFilters((p) => ({ ...p, supervisor_id: e.target.value }))}>
+              <option value="">all supervisors</option>
+              {users.filter((u) => u.role === "SUPERVISOR").map((u) => (
+                <option key={u.id} value={u.id}>{u.full_name}</option>
+              ))}
+            </select>
             <select value={filters.skill_id}
               onChange={(e) => setFilters((p) => ({ ...p, skill_id: e.target.value }))}>
               <option value="">all skills</option>
@@ -220,9 +230,11 @@ export function ManagerPage() {
             <select value={filters.final_grade}
               onChange={(e) => setFilters((p) => ({ ...p, final_grade: e.target.value }))}>
               <option value="">all grades</option>
-              <option value="1">1 — Remediate</option>
-              <option value="2">2 — Meets</option>
-              <option value="3">3 — Exceeds</option>
+              <option value="1">1 — Does not meet Standards</option>
+              <option value="2">2 — Needs Improvement</option>
+              <option value="3">3 — Meets Standard</option>
+              <option value="4">4 — Exceeds Standard</option>
+              <option value="5">5 — Outstanding</option>
             </select>
             <select value={filters.sort_by}
               onChange={(e) => setFilters((p) => ({ ...p, sort_by: e.target.value }))}>

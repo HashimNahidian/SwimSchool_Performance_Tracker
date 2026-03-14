@@ -2,15 +2,19 @@ import type { EvaluationDetail } from "../types";
 import { WaveLogo } from "./WaveLogo";
 
 const RATING_LABEL: Record<number, string> = {
-  1: "Remediate",
-  2: "Meets Standard",
-  3: "Exceeds Standard",
+  1: "Does not meet Standards",
+  2: "Needs Improvement",
+  3: "Meets Standard",
+  4: "Exceeds Standard",
+  5: "Outstanding",
 };
 
 const RATING_COLOR: Record<number, string> = {
   1: "#b91c1c",
-  2: "#0077b6",
-  3: "#15803d",
+  2: "#c2550a",
+  3: "#0077b6",
+  4: "#15803d",
+  5: "#166534",
 };
 
 function ReportContent({ ev }: { ev: EvaluationDetail }) {
@@ -96,14 +100,6 @@ function ReportContent({ ev }: { ev: EvaluationDetail }) {
             </tbody>
           </table>
 
-          {/* Rating legend */}
-          <div className="report-legend">
-            {[1, 2, 3].map((v) => (
-              <span key={v} style={{ color: RATING_COLOR[v] }}>
-                <strong>{v}</strong> = {RATING_LABEL[v]}
-              </span>
-            ))}
-          </div>
         </div>
       )}
 
@@ -114,18 +110,6 @@ function ReportContent({ ev }: { ev: EvaluationDetail }) {
           <p className="report-notes">{ev.notes}</p>
         </div>
       )}
-
-      {/* Signature block */}
-      <div className="report-signatures">
-        <div className="report-sig-box">
-          <div className="report-sig-line" />
-          <p>Instructor Signature &amp; Date</p>
-        </div>
-        <div className="report-sig-box">
-          <div className="report-sig-line" />
-          <p>Supervisor Signature &amp; Date</p>
-        </div>
-      </div>
 
       {/* Footer */}
       <div className="report-footer">

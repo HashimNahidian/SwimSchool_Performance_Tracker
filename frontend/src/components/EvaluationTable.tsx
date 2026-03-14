@@ -5,9 +5,11 @@ function fmtDate(iso: string) {
 }
 
 const GRADE_LABEL: Record<number, string> = {
-  1: "Remediate",
-  2: "Meets",
-  3: "Exceeds",
+  1: "Does not meet Standards",
+  2: "Needs Improvement",
+  3: "Meets Standard",
+  4: "Exceeds Standard",
+  5: "Outstanding",
 };
 
 export function EvaluationTable({
