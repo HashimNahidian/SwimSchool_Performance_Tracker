@@ -146,6 +146,25 @@ export function listAttributes(token: string): Promise<Attribute[]> {
   return request("/manager/attributes", "GET", undefined, token);
 }
 
+export function createAttribute(
+  token: string,
+  payload: { name: string; description?: string | null; sort_order?: number }
+): Promise<Attribute> {
+  return request("/manager/attributes", "POST", payload, token);
+}
+
+export function updateAttribute(
+  token: string,
+  attributeId: number,
+  payload: { name?: string; description?: string | null; sort_order?: number }
+): Promise<Attribute> {
+  return request(`/manager/attributes/${attributeId}`, "PUT", payload, token);
+}
+
+export function deleteAttribute(token: string, attributeId: number): Promise<void> {
+  return request(`/manager/attributes/${attributeId}`, "DELETE", undefined, token);
+}
+
 export function listManagerEvaluations(token: string): Promise<EvaluationSummary[]> {
   return request("/manager/evaluations", "GET", undefined, token);
 }

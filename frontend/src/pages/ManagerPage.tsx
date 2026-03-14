@@ -2,25 +2,29 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth";
 import type { ManagerEvaluationQuery } from "../api";
 import {
+  createAttribute,
   createLevel,
   createSkill,
   createUser,
+  deleteAttribute,
   deleteLevel,
   deleteSkill,
   deleteUser,
   emailEvaluationsCsv,
   exportEvaluationsCsvUrl,
   getManagerEvaluationDetail,
+  listAttributes,
   listLevels,
   listManagerEvaluationsWithQuery,
   listSkills,
   listUsers,
+  updateAttribute,
   updateLevel,
   updateManagerEvaluation,
   updateSkill,
   updateUser,
 } from "../api";
-import type { EvaluationDetail, EvaluationSummary, Level, Skill, User, UserRole } from "../types";
+import type { Attribute, EvaluationDetail, EvaluationSummary, Level, Skill, User, UserRole } from "../types";
 import { Section } from "../components/Section";
 import { EvaluationTable } from "../components/EvaluationTable";
 import { BarChart } from "../components/BarChart";
@@ -68,6 +72,7 @@ export function ManagerPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [attributes, setAttributes] = useState<Attribute[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
   const [reportEval, setReportEval] = useState<EvaluationDetail | null>(null);
   const [editEval, setEditEval] = useState<EvaluationDetail | null>(null);
@@ -85,13 +90,14 @@ export function ManagerPage() {
   useEffect(() => {
     if (!token) return;
     Promise.all([
-      listUsers(token), listLevels(token), listSkills(token),
+      listUsers(token), listLevels(token), listSkills(token), listAttributes(token),
       listManagerEvaluationsWithQuery(token, appliedQuery)
     ])
-      .then(([u, l, s, e]) => {
+      .then(([u, l, s, a, e]) => {
         setUsers(u);
         setLevels(l);
         setSkills(s);
+        setAttributes(a);
         setEvaluations(e);
       })
       .catch((e: Error) => setError(e.message));
@@ -183,6 +189,7 @@ export function ManagerPage() {
           token={token}
           levels={levels}
           skills={skills}
+          attributes={attributes}
           onLevelCreated={(l) => setLevels((p) => [...p, l])}
           onLevelUpdated={(l) => setLevels((p) => p.map((item) => (item.id === l.id ? l : item)))}
           onLevelDeleted={(levelId) => {
@@ -192,6 +199,9 @@ export function ManagerPage() {
           onSkillCreated={(s) => setSkills((p) => [...p, s])}
           onSkillUpdated={(s) => setSkills((p) => p.map((item) => (item.id === s.id ? s : item)))}
           onSkillDeleted={(skillId) => setSkills((p) => p.filter((item) => item.id !== skillId))}
+          onAttributeCreated={(a) => setAttributes((p) => [...p, a])}
+          onAttributeUpdated={(a) => setAttributes((p) => p.map((item) => (item.id === a.id ? a : item)))}
+          onAttributeDeleted={(id) => setAttributes((p) => p.filter((item) => item.id !== id))}
         />
       )}
       {tab === "evaluations" && (
@@ -522,42 +532,65 @@ function ManagerUsers({
   );
 }
 
+type LevelsSubTab = "levels" | "skills" | "attributes";
+
 function ManagerLevels({
   token,
   levels,
   skills,
+  attributes,
   onLevelCreated,
   onLevelUpdated,
   onLevelDeleted,
   onSkillCreated,
   onSkillUpdated,
   onSkillDeleted,
+  onAttributeCreated,
+  onAttributeUpdated,
+  onAttributeDeleted,
 }: {
   token: string;
   levels: Level[];
   skills: Skill[];
+  attributes: Attribute[];
   onLevelCreated: (l: Level) => void;
   onLevelUpdated: (l: Level) => void;
   onLevelDeleted: (levelId: number) => void;
   onSkillCreated: (s: Skill) => void;
   onSkillUpdated: (s: Skill) => void;
   onSkillDeleted: (skillId: number) => void;
+  onAttributeCreated: (a: Attribute) => void;
+  onAttributeUpdated: (a: Attribute) => void;
+  onAttributeDeleted: (id: number) => void;
 }) {
+  const [subTab, setSubTab] = useState<LevelsSubTab>("levels");
+
+  // ── Levels state ──
   const [levelName, setLevelName] = useState("");
   const [editingLevelId, setEditingLevelId] = useState<number | null>(null);
   const [editLevelName, setEditLevelName] = useState("");
 
+  // ── Skills state ──
   const [skillName, setSkillName] = useState("");
   const [skillLevelId, setSkillLevelId] = useState<number>(levels[0]?.id ?? 0);
   const [editingSkillId, setEditingSkillId] = useState<number | null>(null);
   const [editSkillName, setEditSkillName] = useState("");
   const [editSkillLevelId, setEditSkillLevelId] = useState<number>(levels[0]?.id ?? 0);
+
+  // ── Attributes state ──
+  const [attrName, setAttrName] = useState("");
+  const [attrDesc, setAttrDesc] = useState("");
+  const [editingAttrId, setEditingAttrId] = useState<number | null>(null);
+  const [editAttrName, setEditAttrName] = useState("");
+  const [editAttrDesc, setEditAttrDesc] = useState("");
+
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (!skillLevelId && levels.length > 0) setSkillLevelId(levels[0].id);
   }, [skillLevelId, levels]);
 
+  // ── Level handlers ──
   async function onCreateLevel(e: FormEvent) {
     e.preventDefault();
     try {
@@ -568,12 +601,6 @@ function ManagerLevels({
     } catch (err) {
       setError((err as Error).message);
     }
-  }
-
-  function beginEditLevel(level: Level) {
-    setEditingLevelId(level.id);
-    setEditLevelName(level.name);
-    setError("");
   }
 
   async function saveLevel(levelId: number) {
@@ -588,8 +615,7 @@ function ManagerLevels({
   }
 
   async function removeLevel(level: Level) {
-    const confirmed = window.confirm(`Delete level ${level.name}?`);
-    if (!confirmed) return;
+    if (!window.confirm(`Delete level "${level.name}"? All its skills will also be deleted.`)) return;
     try {
       setError("");
       await deleteLevel(token, level.id);
@@ -600,14 +626,12 @@ function ManagerLevels({
     }
   }
 
+  // ── Skill handlers ──
   async function onCreateSkill(e: FormEvent) {
     e.preventDefault();
     try {
       setError("");
-      const skill = await createSkill(token, {
-        name: skillName,
-        level_id: skillLevelId,
-      });
+      const skill = await createSkill(token, { name: skillName, level_id: skillLevelId });
       onSkillCreated(skill);
       setSkillName("");
     } catch (err) {
@@ -615,20 +639,10 @@ function ManagerLevels({
     }
   }
 
-  function beginEditSkill(skill: Skill) {
-    setEditingSkillId(skill.id);
-    setEditSkillName(skill.name);
-    setEditSkillLevelId(skill.level_id);
-    setError("");
-  }
-
   async function saveSkill(skillId: number) {
     try {
       setError("");
-      const updated = await updateSkill(token, skillId, {
-        name: editSkillName,
-        level_id: editSkillLevelId,
-      });
+      const updated = await updateSkill(token, skillId, { name: editSkillName, level_id: editSkillLevelId });
       onSkillUpdated(updated);
       setEditingSkillId(null);
     } catch (err) {
@@ -637,8 +651,7 @@ function ManagerLevels({
   }
 
   async function removeSkill(skill: Skill) {
-    const confirmed = window.confirm(`Delete skill ${skill.name}?`);
-    if (!confirmed) return;
+    if (!window.confirm(`Delete skill "${skill.name}"?`)) return;
     try {
       setError("");
       await deleteSkill(token, skill.id);
@@ -649,97 +662,188 @@ function ManagerLevels({
     }
   }
 
+  // ── Attribute handlers ──
+  async function onCreateAttribute(e: FormEvent) {
+    e.preventDefault();
+    try {
+      setError("");
+      const attr = await createAttribute(token, { name: attrName, description: attrDesc.trim() || null });
+      onAttributeCreated(attr);
+      setAttrName("");
+      setAttrDesc("");
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function saveAttribute(attrId: number) {
+    try {
+      setError("");
+      const updated = await updateAttribute(token, attrId, {
+        name: editAttrName,
+        description: editAttrDesc.trim() || null,
+      });
+      onAttributeUpdated(updated);
+      setEditingAttrId(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function removeAttribute(attr: Attribute) {
+    if (!window.confirm(`Delete attribute "${attr.name}"?`)) return;
+    try {
+      setError("");
+      await deleteAttribute(token, attr.id);
+      onAttributeDeleted(attr.id);
+      if (editingAttrId === attr.id) setEditingAttrId(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   return (
-    <Section title="Levels">
-      <form className="form inline" onSubmit={onCreateLevel}>
-        <input
-          value={levelName}
-          onChange={(e) => setLevelName(e.target.value)}
-          placeholder="e.g. Level 1 - Beginner"
-          required
-        />
-        <button type="submit">Add Level</button>
-      </form>
+    <Section title="Curriculum">
+      <nav className="tabs" style={{ marginBottom: 16 }}>
+        {(["levels", "skills", "attributes"] as LevelsSubTab[]).map((t) => (
+          <button key={t} className={subTab === t ? "active" : ""} onClick={() => { setSubTab(t); setError(""); }}>
+            {t === "levels" ? "Levels" : t === "skills" ? "Skills" : "Attributes"}
+          </button>
+        ))}
+      </nav>
 
-      <table>
-        <thead><tr><th>Level Name</th><th>Actions</th></tr></thead>
-        <tbody>
-          {levels.map((l) => (
-            <tr key={l.id}>
-              {editingLevelId === l.id ? (
-                <>
-                  <td><input value={editLevelName} onChange={(e) => setEditLevelName(e.target.value)} /></td>
-                  <td>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button type="button" onClick={() => saveLevel(l.id)}>Save</button>
-                      <button type="button" className="btn-add" onClick={() => setEditingLevelId(null)}>Cancel</button>
-                    </div>
-                  </td>
-                </>
-              ) : (
-                <>
-                  <td>{l.name}</td>
-                  <td>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button type="button" onClick={() => beginEditLevel(l)}>Edit</button>
-                      <button type="button" className="btn-add" onClick={() => removeLevel(l)}>Delete</button>
-                    </div>
-                  </td>
-                </>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {error && <p className="error" style={{ marginBottom: 10 }}>{error}</p>}
 
-      <div style={{ marginTop: 20 }}>
-        <p className="chart-section-title">Skills</p>
-        <form className="form inline" onSubmit={onCreateSkill}>
-          <input value={skillName} onChange={(e) => setSkillName(e.target.value)} placeholder="e.g. Freestyle" required />
-          <select value={skillLevelId} onChange={(e) => setSkillLevelId(Number(e.target.value))}>
-            {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-          <button type="submit" disabled={levels.length === 0}>Add Skill</button>
-        </form>
-      </div>
+      {subTab === "levels" && (
+        <>
+          <form className="form inline" onSubmit={onCreateLevel}>
+            <input value={levelName} onChange={(e) => setLevelName(e.target.value)} placeholder="e.g. Seahorse" required />
+            <button type="submit">Add Level</button>
+          </form>
+          <table>
+            <thead><tr><th>Level Name</th><th>Skills</th><th>Actions</th></tr></thead>
+            <tbody>
+              {levels.map((l) => (
+                <tr key={l.id}>
+                  {editingLevelId === l.id ? (
+                    <>
+                      <td><input value={editLevelName} onChange={(e) => setEditLevelName(e.target.value)} /></td>
+                      <td>{skills.filter((s) => s.level_id === l.id).length}</td>
+                      <td>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button type="button" onClick={() => saveLevel(l.id)}>Save</button>
+                          <button type="button" className="btn-add" onClick={() => setEditingLevelId(null)}>Cancel</button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{l.name}</td>
+                      <td>{skills.filter((s) => s.level_id === l.id).length}</td>
+                      <td>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button type="button" onClick={() => { setEditingLevelId(l.id); setEditLevelName(l.name); setError(""); }}>Edit</button>
+                          <button type="button" className="btn-add" onClick={() => removeLevel(l)}>Delete</button>
+                        </div>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
 
-      <table>
-        <thead><tr><th>Skill</th><th>Level</th><th>Actions</th></tr></thead>
-        <tbody>
-          {skills.map((s) => (
-            <tr key={s.id}>
-              {editingSkillId === s.id ? (
-                <>
-                  <td><input value={editSkillName} onChange={(e) => setEditSkillName(e.target.value)} /></td>
-                  <td>
-                    <select value={editSkillLevelId} onChange={(e) => setEditSkillLevelId(Number(e.target.value))}>
-                      {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                    </select>
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button type="button" onClick={() => saveSkill(s.id)}>Save</button>
-                      <button type="button" className="btn-add" onClick={() => setEditingSkillId(null)}>Cancel</button>
-                    </div>
-                  </td>
-                </>
-              ) : (
-                <>
-                  <td>{s.name}</td>
-                  <td>{levels.find((l) => l.id === s.level_id)?.name ?? s.level_id}</td>
-                  <td>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button type="button" onClick={() => beginEditSkill(s)}>Edit</button>
-                      <button type="button" className="btn-add" onClick={() => removeSkill(s)}>Delete</button>
-                    </div>
-                  </td>
-                </>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {error && <p className="error" style={{ marginTop: 10 }}>{error}</p>}
+      {subTab === "skills" && (
+        <>
+          <form className="form inline" onSubmit={onCreateSkill}>
+            <input value={skillName} onChange={(e) => setSkillName(e.target.value)} placeholder="e.g. Freestyle" required />
+            <select value={skillLevelId} onChange={(e) => setSkillLevelId(Number(e.target.value))}>
+              {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+            <button type="submit" disabled={levels.length === 0}>Add Skill</button>
+          </form>
+          <table>
+            <thead><tr><th>Skill</th><th>Level</th><th>Actions</th></tr></thead>
+            <tbody>
+              {skills.map((s) => (
+                <tr key={s.id}>
+                  {editingSkillId === s.id ? (
+                    <>
+                      <td><input value={editSkillName} onChange={(e) => setEditSkillName(e.target.value)} /></td>
+                      <td>
+                        <select value={editSkillLevelId} onChange={(e) => setEditSkillLevelId(Number(e.target.value))}>
+                          {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                        </select>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button type="button" onClick={() => saveSkill(s.id)}>Save</button>
+                          <button type="button" className="btn-add" onClick={() => setEditingSkillId(null)}>Cancel</button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{s.name}</td>
+                      <td>{levels.find((l) => l.id === s.level_id)?.name ?? s.level_id}</td>
+                      <td>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button type="button" onClick={() => { setEditingSkillId(s.id); setEditSkillName(s.name); setEditSkillLevelId(s.level_id); setError(""); }}>Edit</button>
+                          <button type="button" className="btn-add" onClick={() => removeSkill(s)}>Delete</button>
+                        </div>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {subTab === "attributes" && (
+        <>
+          <form className="form inline" onSubmit={onCreateAttribute}>
+            <input value={attrName} onChange={(e) => setAttrName(e.target.value)} placeholder="Attribute name" required />
+            <input value={attrDesc} onChange={(e) => setAttrDesc(e.target.value)} placeholder="Description (optional)" />
+            <button type="submit">Add Attribute</button>
+          </form>
+          <table>
+            <thead><tr><th>Name</th><th>Description</th><th>Actions</th></tr></thead>
+            <tbody>
+              {attributes.map((a) => (
+                <tr key={a.id}>
+                  {editingAttrId === a.id ? (
+                    <>
+                      <td><input value={editAttrName} onChange={(e) => setEditAttrName(e.target.value)} /></td>
+                      <td><input value={editAttrDesc} onChange={(e) => setEditAttrDesc(e.target.value)} placeholder="Description (optional)" /></td>
+                      <td>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button type="button" onClick={() => saveAttribute(a.id)}>Save</button>
+                          <button type="button" className="btn-add" onClick={() => setEditingAttrId(null)}>Cancel</button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{a.name}</td>
+                      <td style={{ color: "#64748b", fontSize: 13 }}>{a.description ?? "—"}</td>
+                      <td>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button type="button" onClick={() => { setEditingAttrId(a.id); setEditAttrName(a.name); setEditAttrDesc(a.description ?? ""); setError(""); }}>Edit</button>
+                          <button type="button" className="btn-add" onClick={() => removeAttribute(a)}>Delete</button>
+                        </div>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </Section>
   );
 }

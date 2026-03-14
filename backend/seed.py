@@ -663,6 +663,178 @@ def seed_curriculum(db, school_id: int) -> None:
                 link_skill_attribute(db, skill_id=skill.id, attribute_id=attr.id)
 
 
+# Evaluations from Sample_Trainee_Evaluations.csv — 2 per level
+SAMPLE_EVALUATIONS = [
+    # Seahorse
+    {
+        "level": "Seahorse", "skill": "Full Pour-Over",
+        "instructor": "alex@propel.local", "supervisor": "casey@propel.local",
+        "ratings": [
+            ('Full shower bucket "dump" pour.', 4),
+            ('Swimmer enjoys the pour over - no "shock" reaction.', 5),
+        ],
+    },
+    {
+        "level": "Seahorse", "skill": "Unassisted Back Float",
+        "instructor": "jordan@propel.local", "supervisor": "taylor@propel.local",
+        "ratings": [
+            ("Fully independent and confident back float.", 3),
+            ("Minimum of 5 seconds.", 3),
+        ],
+    },
+    # Sea Otter
+    {
+        "level": "Sea Otter", "skill": "Practical Swimming",
+        "instructor": "alex@propel.local", "supervisor": "taylor@propel.local",
+        "ratings": [
+            ("Swimmer swims out to the ring, dives down, and retrieves.", 5),
+            ("No breath between swimming to ring and diving.", 5),
+            ("Swim and retrieval should be in one fluid motion.", 4),
+            ("The ring must be minimum 8 feet away from the wall.", 5),
+        ],
+    },
+    {
+        "level": "Sea Otter", "skill": "Unassisted Back Glide",
+        "instructor": "jordan@propel.local", "supervisor": "casey@propel.local",
+        "ratings": [
+            ("Monkey on the wall to start.", 2),
+            ("Swimmer pushes away from the wall, assumes the correct body, head, and arm position.", 2),
+            ("Glide must be for minimum of 5 seconds.", 3),
+        ],
+    },
+    # Pufferfish
+    {
+        "level": "Pufferfish", "skill": "Bobs - Rhythmic Breathing",
+        "instructor": "alex@propel.local", "supervisor": "casey@propel.local",
+        "ratings": [
+            ("Stay submerged for at least 3 seconds.", 4),
+            ("No pause when coming up for a breath - continuous up/down motion.", 4),
+        ],
+    },
+    {
+        "level": "Pufferfish", "skill": "Back Kick",
+        "instructor": "jordan@propel.local", "supervisor": "taylor@propel.local",
+        "ratings": [
+            ("Display proper kicking technique and maintain a consistent, small, fast kick.", 5),
+            ("Maintain a horizontal body position.", 5),
+            ("Achieve and maintain momentum; Swimmer should be able to kick at least 20 feet in under 5 seconds.", 5),
+            ("Keep the knee and ankle joints relaxed and floppy. Foot sweeps up with the top of the leading foot as it reaches the surface.", 4),
+        ],
+    },
+    # Octopus
+    {
+        "level": "Octopus", "skill": "Body Roll Kick 30 Feet",
+        "instructor": "alex@propel.local", "supervisor": "taylor@propel.local",
+        "ratings": [
+            ("Maintain balance and momentum on both front and back before/after the body roll – feet should remain at or close to the surface.", 3),
+            ("Roll using hips and shoulders. Little to no head movement before/during/after roll.", 3),
+            ("Stays 3 seconds on front, 3 on back.", 2),
+            ("Distance of 30 feet.", 3),
+        ],
+    },
+    {
+        "level": "Octopus", "skill": "Basic Rock n Roll Freestyle",
+        "instructor": "jordan@propel.local", "supervisor": "casey@propel.local",
+        "ratings": [
+            ("Swimmer is able to count 3 arm strokes and roll to their back without losing balance or momentum.", 4),
+            ('Perform a "catch-up" stroke with one hand always out in front.', 5),
+            ("Full strokes, reaching as far forward as possible and as far back as possible.", 4),
+        ],
+    },
+    # Spotted Eagle Ray
+    {
+        "level": "Spotted Eagle Ray", "skill": "Freestyle Side Breathing Technique",
+        "instructor": "alex@propel.local", "supervisor": "casey@propel.local",
+        "ratings": [
+            ("Swimmer demonstrates the ability to consistently take a breath to the side by turning the body and head with no upward movement of the head.", 5),
+            ("Proper air exchange/rhythmic breathing - blowing bubbles underwater, taking small fast breaths, arm does not stop during the pull/recovery.", 5),
+            ("Timing of breathing and arms – Begin the body rotation as soon as the hand drops to begin pull. Face goes back into the water just before the hand fully recovers back to the front.", 5),
+        ],
+    },
+    {
+        "level": "Spotted Eagle Ray", "skill": "Catch-Up Freestyle Swimming",
+        "instructor": "jordan@propel.local", "supervisor": "taylor@propel.local",
+        "ratings": [
+            ("Maintain a steady kick throughout the entire activity, especially when breathing.", 1),
+            ("Follow the correct 3 strokes & breathe pattern.", 2),
+            ("Breathe by turning their hips and shoulders to the side with minimal head movement.", 2),
+        ],
+    },
+]
+
+
+def seed_sample_evaluations(db, school_id: int) -> int:
+    created = 0
+    for ev in SAMPLE_EVALUATIONS:
+        instructor = db.scalar(
+            select(models.User).where(
+                models.User.school_id == school_id,
+                models.User.email == ev["instructor"],
+            )
+        )
+        supervisor = db.scalar(
+            select(models.User).where(
+                models.User.school_id == school_id,
+                models.User.email == ev["supervisor"],
+            )
+        )
+        skill = db.scalar(
+            select(models.Skill)
+            .join(models.Level, models.Skill.level_id == models.Level.id)
+            .where(
+                models.Level.school_id == school_id,
+                models.Level.name == ev["level"],
+                models.Skill.name == ev["skill"],
+            )
+        )
+        if not instructor or not supervisor or not skill:
+            print(f"  SKIP: missing data for {ev['level']} / {ev['skill']}")
+            continue
+
+        # Skip if already seeded (same instructor + supervisor + skill)
+        existing = db.scalar(
+            select(models.Evaluation).where(
+                models.Evaluation.instructor_id == instructor.id,
+                models.Evaluation.supervisor_id == supervisor.id,
+                models.Evaluation.skill_id == skill.id,
+            )
+        )
+        if existing:
+            continue
+
+        evaluation = models.Evaluation(
+            school_id=school_id,
+            instructor_id=instructor.id,
+            supervisor_id=supervisor.id,
+            skill_id=skill.id,
+        )
+        db.add(evaluation)
+        db.flush()
+
+        ratings = []
+        for attr_name, rating in ev["ratings"]:
+            attr = db.scalar(
+                select(models.Attribute).where(
+                    models.Attribute.school_id == school_id,
+                    models.Attribute.name == attr_name,
+                )
+            )
+            if attr:
+                db.add(models.EvaluationRating(
+                    evaluation_id=evaluation.id,
+                    attribute_id=attr.id,
+                    rating=rating,
+                ))
+                ratings.append(rating)
+
+        if ratings:
+            evaluation.final_grade = round(sum(ratings) / len(ratings))
+
+        created += 1
+
+    return created
+
+
 def seed() -> None:
     load_dotenv()
     with SessionLocal() as db:
@@ -696,9 +868,43 @@ def seed() -> None:
             role=models.UserRole.INSTRUCTOR,
             school_id=school.id,
         )
+        get_or_create_user(
+            db,
+            full_name="Alex Rivera",
+            email="alex@propel.local",
+            password="Propel123!",
+            role=models.UserRole.INSTRUCTOR,
+            school_id=school.id,
+        )
+        get_or_create_user(
+            db,
+            full_name="Jordan Lee",
+            email="jordan@propel.local",
+            password="Propel123!",
+            role=models.UserRole.INSTRUCTOR,
+            school_id=school.id,
+        )
+        get_or_create_user(
+            db,
+            full_name="Casey Morgan",
+            email="casey@propel.local",
+            password="Propel123!",
+            role=models.UserRole.SUPERVISOR,
+            school_id=school.id,
+        )
+        get_or_create_user(
+            db,
+            full_name="Taylor Brooks",
+            email="taylor@propel.local",
+            password="Propel123!",
+            role=models.UserRole.SUPERVISOR,
+            school_id=school.id,
+        )
 
         seed_curriculum(db, school.id)
+        db.commit()
 
+        n = seed_sample_evaluations(db, school.id)
         db.commit()
 
     print("Seed complete.")
@@ -706,9 +912,13 @@ def seed() -> None:
     print("  manager@propel.local    (Manager    — Mia Manager)")
     print("  supervisor@propel.local (Supervisor — Sam Supervisor)")
     print("  instructor@propel.local (Instructor — Sarah Johnson)")
+    print("  alex@propel.local       (Instructor — Alex Rivera)")
+    print("  jordan@propel.local     (Instructor — Jordan Lee)")
+    print("  casey@propel.local      (Supervisor — Casey Morgan)")
+    print("  taylor@propel.local     (Supervisor — Taylor Brooks)")
     print(f"Curriculum: {len(CURRICULUM)} levels, "
-          f"{sum(len(l['skills']) for l in CURRICULUM)} skills, "
-          f"{sum(len(a) for l in CURRICULUM for s in l['skills'] for a in [s['attributes']])} attribute entries seeded.")
+          f"{sum(len(l['skills']) for l in CURRICULUM)} skills seeded.")
+    print(f"Sample evaluations: {n} created.")
 
 
 if __name__ == "__main__":
