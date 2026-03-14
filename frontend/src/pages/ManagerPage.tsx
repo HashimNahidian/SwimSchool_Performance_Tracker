@@ -947,13 +947,6 @@ function ManagerDashboard({
 
   return (
     <>
-      {/* Stat cards */}
-      <div className="stat-cards">
-        <StatCard label="Total Evaluations" value={total} color="#023e8a" />
-        <StatCard label="Graded" value={graded} color="#0077b6" />
-        <StatCard label="This Week" value={recent7d} color="#0f9b8e" />
-      </div>
-
       {/* Quick actions */}
       <div className="card" style={{ padding: "16px 24px" }}>
         <div className="dash-actions">
