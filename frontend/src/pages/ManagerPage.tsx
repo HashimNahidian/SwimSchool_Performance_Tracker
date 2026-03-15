@@ -7,6 +7,7 @@ import {
   createSkill,
   createUser,
   deleteAttribute,
+  deleteManagerEvaluation,
   deleteLevel,
   deleteSkill,
   deleteUser,
@@ -14,11 +15,13 @@ import {
   exportEvaluationsCsvUrl,
   getManagerEvaluationDetail,
   linkSkillAttribute,
+  listManagerSkillAttributes,
   listAttributes,
   listLevels,
   listManagerEvaluationsWithQuery,
   listSkills,
   listUsers,
+  unlinkSkillAttribute,
   updateAttribute,
   updateLevel,
   updateManagerEvaluation,
@@ -57,6 +60,7 @@ function buildQuery(filters: Record<string, string>): ManagerEvaluationQuery {
   if (supervisorId !== undefined) q.supervisor_id = supervisorId;
   if (skillId !== undefined) q.skill_id = skillId;
   if (finalGrade !== undefined) q.final_grade = finalGrade;
+  if (filters.needs_reevaluation) q.needs_reevaluation = filters.needs_reevaluation === "true";
   if (filters.date_from) q.date_from = filters.date_from;
   if (filters.date_to) q.date_to = filters.date_to;
   q.sort_by = SORT_FIELDS.has(filters.sort_by as NonNullable<ManagerEvaluationQuery["sort_by"]>)
@@ -77,10 +81,11 @@ export function ManagerPage() {
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
   const [reportEval, setReportEval] = useState<EvaluationDetail | null>(null);
   const [editEval, setEditEval] = useState<EvaluationDetail | null>(null);
+  const [pendingDeleteEval, setPendingDeleteEval] = useState<EvaluationSummary | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [filters, setFilters] = useState({
     instructor_id: "", supervisor_id: "", skill_id: "",
-    final_grade: "", date_from: "", date_to: "",
+    final_grade: "", needs_reevaluation: "", date_from: "", date_to: "",
     sort_by: "created_at", sort_dir: "desc"
   });
   const [appliedQuery, setAppliedQuery] = useState<ManagerEvaluationQuery>({
@@ -148,6 +153,28 @@ export function ManagerPage() {
     }
   }
 
+  function handleDeleteEval(id: number) {
+    const target = evaluations.find((item) => item.id === id);
+    if (!target) return;
+    setPendingDeleteEval(target);
+  }
+
+  async function confirmDeleteEval() {
+    if (!token) return;
+    const target = pendingDeleteEval;
+    if (!target) return;
+    try {
+      setError("");
+      await deleteManagerEvaluation(token, target.id);
+      setEvaluations((prev) => prev.filter((item) => item.id !== target.id));
+      if (reportEval?.id === target.id) setReportEval(null);
+      if (editEval?.id === target.id) setEditEval(null);
+      setPendingDeleteEval(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   if (!token) return null;
 
   return (
@@ -174,6 +201,7 @@ export function ManagerPage() {
           appliedManagerQuery={appliedQuery}
           onView={handleViewReport}
           onEdit={handleEditEval}
+          onDelete={handleDeleteEval}
         />
       )}
       {tab === "users" && (
@@ -236,6 +264,12 @@ export function ManagerPage() {
               <option value="4">4 — Exceeds Standard</option>
               <option value="5">5 — Outstanding</option>
             </select>
+            <select value={filters.needs_reevaluation}
+              onChange={(e) => setFilters((p) => ({ ...p, needs_reevaluation: e.target.value }))}>
+              <option value="">all reevaluation states</option>
+              <option value="true">needs reevaluation</option>
+              <option value="false">does not need reevaluation</option>
+            </select>
             <select value={filters.sort_by}
               onChange={(e) => setFilters((p) => ({ ...p, sort_by: e.target.value }))}>
               <option value="created_at">date created</option>
@@ -292,7 +326,12 @@ export function ManagerPage() {
             onClick={(e) => { if (!token) return; e.preventDefault(); downloadCsv(); }}>
             Export CSV
           </a>
-          <EvaluationTable rows={evaluations} onView={handleViewReport} onEdit={handleEditEval} />
+          <EvaluationTable
+            rows={evaluations}
+            onView={handleViewReport}
+            onEdit={handleEditEval}
+            onDelete={handleDeleteEval}
+          />
           <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 12 }}>
             <button
               type="button"
@@ -334,12 +373,54 @@ export function ManagerPage() {
           updateFn={updateManagerEvaluation}
           showSubmit={false}
           onSaved={(updated) => {
-            setEvaluations((prev) => prev.map((e) => (e.id === updated.id ? { ...e } : e)));
+            setEvaluations((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
             setEditEval(null);
           }}
           onSubmitted={() => setEditEval(null)}
           onClose={() => setEditEval(null)}
         />
+      )}
+
+      {pendingDeleteEval && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              width: "min(420px, 100%)",
+              background: "white",
+              borderRadius: 16,
+              padding: 24,
+              boxShadow: "0 24px 60px rgba(15, 23, 42, 0.22)",
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>Delete Evaluation</h3>
+            <p style={{ marginTop: 0, marginBottom: 20 }}>
+              Are you sure you want to delete this eval?
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button type="button" className="btn-add" onClick={() => setPendingDeleteEval(null)}>
+                No
+              </button>
+              <button
+                type="button"
+                onClick={() => { void confirmDeleteEval(); }}
+                style={{ background: "#c2410c" }}
+              >
+                Yes
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
@@ -545,7 +626,7 @@ function ManagerUsers({
   );
 }
 
-type LevelsSubTab = "levels" | "skills" | "attributes";
+type LevelsSubTab = "levels" | "skills";
 
 function ManagerLevels({
   token,
@@ -589,17 +670,24 @@ function ManagerLevels({
   const [editingSkillId, setEditingSkillId] = useState<number | null>(null);
   const [editSkillName, setEditSkillName] = useState("");
   const [editSkillLevelId, setEditSkillLevelId] = useState<number>(levels[0]?.id ?? 0);
+  const [activeSkillAttributesId, setActiveSkillAttributesId] = useState<number | null>(null);
+  const [linkedAttributes, setLinkedAttributes] = useState<Attribute[]>([]);
+  const [existingAttributeId, setExistingAttributeId] = useState<number>(0);
 
   // ── Attributes state ──
   const [attrName, setAttrName] = useState("");
   const [attrDesc, setAttrDesc] = useState("");
-  const [attrLevelId, setAttrLevelId] = useState<number>(levels[0]?.id ?? 0);
-  const [attrSkillId, setAttrSkillId] = useState<number>(0);
   const [editingAttrId, setEditingAttrId] = useState<number | null>(null);
   const [editAttrName, setEditAttrName] = useState("");
   const [editAttrDesc, setEditAttrDesc] = useState("");
-
-  const attrLevelSkills = useMemo(() => skills.filter((s) => s.level_id === attrLevelId), [skills, attrLevelId]);
+  const activeSkill = useMemo(
+    () => skills.find((skill) => skill.id === activeSkillAttributesId) ?? null,
+    [skills, activeSkillAttributesId]
+  );
+  const availableAttributes = useMemo(
+    () => attributes.filter((attribute) => !linkedAttributes.some((linked) => linked.id === attribute.id)),
+    [attributes, linkedAttributes]
+  );
 
   const [error, setError] = useState("");
 
@@ -608,12 +696,18 @@ function ManagerLevels({
   }, [skillLevelId, levels]);
 
   useEffect(() => {
-    if (!attrLevelId && levels.length > 0) setAttrLevelId(levels[0].id);
-  }, [attrLevelId, levels]);
-
-  useEffect(() => {
-    setAttrSkillId(attrLevelSkills[0]?.id ?? 0);
-  }, [attrLevelId, attrLevelSkills]);
+    if (activeSkillAttributesId == null) {
+      setLinkedAttributes([]);
+      setExistingAttributeId(0);
+      return;
+    }
+    listManagerSkillAttributes(token, activeSkillAttributesId)
+      .then((items) => {
+        setLinkedAttributes(items);
+        setExistingAttributeId((current) => (current && items.some((item) => item.id === current) ? current : 0));
+      })
+      .catch((err: Error) => setError(err.message));
+  }, [activeSkillAttributesId, token]);
 
   // ── Level handlers ──
   async function onCreateLevel(e: FormEvent) {
@@ -688,15 +782,30 @@ function ManagerLevels({
   }
 
   // ── Attribute handlers ──
+  async function attachExistingAttribute() {
+    if (!activeSkillAttributesId || !existingAttributeId) return;
+    try {
+      setError("");
+      await linkSkillAttribute(token, activeSkillAttributesId, existingAttributeId);
+      const attribute = attributes.find((item) => item.id === existingAttributeId);
+      if (attribute) {
+        setLinkedAttributes((prev) => [...prev, attribute]);
+      }
+      setExistingAttributeId(0);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   async function onCreateAttribute(e: FormEvent) {
     e.preventDefault();
+    if (!activeSkillAttributesId) return;
     try {
       setError("");
       const attr = await createAttribute(token, { name: attrName, description: attrDesc.trim() || null });
-      if (attrSkillId) {
-        await linkSkillAttribute(token, attrSkillId, attr.id);
-      }
+      await linkSkillAttribute(token, activeSkillAttributesId, attr.id);
       onAttributeCreated(attr);
+      setLinkedAttributes((prev) => [...prev, attr]);
       setAttrName("");
       setAttrDesc("");
     } catch (err) {
@@ -712,7 +821,20 @@ function ManagerLevels({
         description: editAttrDesc.trim() || null,
       });
       onAttributeUpdated(updated);
+      setLinkedAttributes((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
       setEditingAttrId(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function detachAttribute(attributeId: number) {
+    if (!activeSkillAttributesId) return;
+    try {
+      setError("");
+      await unlinkSkillAttribute(token, activeSkillAttributesId, attributeId);
+      setLinkedAttributes((prev) => prev.filter((item) => item.id !== attributeId));
+      if (editingAttrId === attributeId) setEditingAttrId(null);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -724,6 +846,7 @@ function ManagerLevels({
       setError("");
       await deleteAttribute(token, attr.id);
       onAttributeDeleted(attr.id);
+      setLinkedAttributes((prev) => prev.filter((item) => item.id !== attr.id));
       if (editingAttrId === attr.id) setEditingAttrId(null);
     } catch (err) {
       setError((err as Error).message);
@@ -733,9 +856,9 @@ function ManagerLevels({
   return (
     <Section title="Curriculum">
       <nav className="tabs" style={{ marginBottom: 16 }}>
-        {(["levels", "skills", "attributes"] as LevelsSubTab[]).map((t) => (
+        {(["levels", "skills"] as LevelsSubTab[]).map((t) => (
           <button key={t} className={subTab === t ? "active" : ""} onClick={() => { setSubTab(t); setError(""); }}>
-            {t === "levels" ? "Levels" : t === "skills" ? "Skills" : "Attributes"}
+            {t === "levels" ? "Levels" : "Skills"}
           </button>
         ))}
       </nav>
@@ -819,6 +942,18 @@ function ManagerLevels({
                       <td>
                         <div style={{ display: "flex", gap: 8 }}>
                           <button type="button" onClick={() => { setEditingSkillId(s.id); setEditSkillName(s.name); setEditSkillLevelId(s.level_id); setError(""); }}>Edit</button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveSkillAttributesId((current) => (current === s.id ? null : s.id));
+                              setEditingAttrId(null);
+                              setAttrName("");
+                              setAttrDesc("");
+                              setError("");
+                            }}
+                          >
+                            Attributes
+                          </button>
                           <button type="button" className="btn-add" onClick={() => removeSkill(s)}>Delete</button>
                         </div>
                       </td>
@@ -831,52 +966,94 @@ function ManagerLevels({
         </>
       )}
 
-      {subTab === "attributes" && (
-        <>
-          <form className="form inline" onSubmit={onCreateAttribute}>
-            <input value={attrName} onChange={(e) => setAttrName(e.target.value)} placeholder="Attribute name" required />
-            <input value={attrDesc} onChange={(e) => setAttrDesc(e.target.value)} placeholder="Description (optional)" />
-            <select value={attrLevelId} onChange={(e) => setAttrLevelId(Number(e.target.value))}>
-              {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
-            <select value={attrSkillId} onChange={(e) => setAttrSkillId(Number(e.target.value))} disabled={attrLevelSkills.length === 0}>
-              {attrLevelSkills.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <button type="submit" disabled={levels.length === 0 || attrLevelSkills.length === 0}>Add Attribute</button>
-          </form>
+      {subTab === "skills" && activeSkill && (
+        <div style={{ marginTop: 18, padding: 18, border: "1px solid #d7e4ef", borderRadius: 14, background: "#f8fbfe" }}>
+          <h3 style={{ marginTop: 0, marginBottom: 8 }}>Attributes For {activeSkill.name}</h3>
+          <p style={{ marginTop: 0, marginBottom: 16, color: "#64748b", fontSize: 14 }}>
+            These are the attributes that will appear when a supervisor evaluates this skill.
+          </p>
+
+          <div style={{ display: "grid", gap: 12, marginBottom: 18 }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <select
+                value={existingAttributeId}
+                onChange={(e) => setExistingAttributeId(Number(e.target.value))}
+                style={{ minWidth: 240 }}
+              >
+                <option value={0}>Link existing attribute</option>
+                {availableAttributes.map((attribute) => (
+                  <option key={attribute.id} value={attribute.id}>
+                    {attribute.name}
+                  </option>
+                ))}
+              </select>
+              <button type="button" onClick={() => { void attachExistingAttribute(); }} disabled={existingAttributeId === 0}>
+                Add Existing Attribute
+              </button>
+            </div>
+
+            <form className="form inline" onSubmit={onCreateAttribute}>
+              <input value={attrName} onChange={(e) => setAttrName(e.target.value)} placeholder="New attribute name" required />
+              <input value={attrDesc} onChange={(e) => setAttrDesc(e.target.value)} placeholder="Description (optional)" />
+              <button type="submit">Create And Add</button>
+            </form>
+          </div>
+
           <table>
             <thead><tr><th>Name</th><th>Description</th><th>Actions</th></tr></thead>
             <tbody>
-              {attributes.map((a) => (
-                <tr key={a.id}>
-                  {editingAttrId === a.id ? (
+              {linkedAttributes.map((attribute) => (
+                <tr key={attribute.id}>
+                  {editingAttrId === attribute.id ? (
                     <>
                       <td><input value={editAttrName} onChange={(e) => setEditAttrName(e.target.value)} /></td>
                       <td><input value={editAttrDesc} onChange={(e) => setEditAttrDesc(e.target.value)} placeholder="Description (optional)" /></td>
                       <td>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button type="button" onClick={() => saveAttribute(a.id)}>Save</button>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button type="button" onClick={() => saveAttribute(attribute.id)}>Save</button>
                           <button type="button" className="btn-add" onClick={() => setEditingAttrId(null)}>Cancel</button>
                         </div>
                       </td>
                     </>
                   ) : (
                     <>
-                      <td>{a.name}</td>
-                      <td style={{ color: "#64748b", fontSize: 13 }}>{a.description ?? "—"}</td>
+                      <td>{attribute.name}</td>
+                      <td style={{ color: "#64748b", fontSize: 13 }}>{attribute.description ?? "—"}</td>
                       <td>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button type="button" onClick={() => { setEditingAttrId(a.id); setEditAttrName(a.name); setEditAttrDesc(a.description ?? ""); setError(""); }}>Edit</button>
-                          <button type="button" className="btn-add" onClick={() => removeAttribute(a)}>Delete</button>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingAttrId(attribute.id);
+                              setEditAttrName(attribute.name);
+                              setEditAttrDesc(attribute.description ?? "");
+                              setError("");
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button type="button" onClick={() => { void detachAttribute(attribute.id); }}>
+                            Remove From Skill
+                          </button>
+                          <button type="button" className="btn-add" onClick={() => removeAttribute(attribute)}>
+                            Delete
+                          </button>
                         </div>
                       </td>
                     </>
                   )}
                 </tr>
               ))}
+              {linkedAttributes.length === 0 && (
+                <tr>
+                  <td colSpan={3} style={{ color: "#64748b" }}>
+                    No attributes linked yet.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
-        </>
+        </div>
       )}
     </Section>
   );
@@ -897,7 +1074,7 @@ function monthLabel(dateStr: string) {
 }
 
 function ManagerDashboard({
-  rows, onGo, onExportCsv, onEmailCsv, appliedManagerQuery, onView, onEdit
+  rows, onGo, onExportCsv, onEmailCsv, appliedManagerQuery, onView, onEdit, onDelete
 }: {
   rows: EvaluationSummary[];
   onGo: (tab: ManagerTab) => void;
@@ -906,6 +1083,7 @@ function ManagerDashboard({
   appliedManagerQuery: ManagerEvaluationQuery;
   onView?: (id: number) => void;
   onEdit?: (id: number) => void;
+  onDelete?: (id: number) => void;
 }) {
   const { total, graded, recent7d, recent } = useMemo(() => {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -1009,7 +1187,7 @@ function ManagerDashboard({
       <div className="card">
         <h2>Recent Evaluations</h2>
         {recent.length > 0 ? (
-          <EvaluationTable rows={recent} onView={onView} onEdit={onEdit} />
+          <EvaluationTable rows={recent} onView={onView} onEdit={onEdit} onDelete={onDelete} />
         ) : (
           <p style={{ color: "#64748b", fontSize: 14 }}>No evaluations yet.</p>
         )}

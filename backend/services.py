@@ -1,8 +1,9 @@
 import csv
 import io
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from models import (
@@ -10,6 +11,8 @@ from models import (
     Evaluation,
     EvaluationRating,
     Level,
+    ReevaluationRequest,
+    ReevaluationStatus,
     Skill,
     SkillAttribute,
     User,
@@ -18,8 +21,11 @@ from models import (
 from schemas import (
     EvaluationDetailOut,
     EvaluationSummaryOut,
+    ReevaluationRequestOut,
     RatingOut,
 )
+
+REEVALUATION_GRADE_THRESHOLD = 2
 
 
 def ensure_user_role(db: Session, user_id: int, expected_role: UserRole, school_id: int) -> User:
@@ -33,7 +39,12 @@ def ensure_skill_in_school(db: Session, skill_id: int, school_id: int) -> Skill:
     skill = db.scalar(
         select(Skill)
         .join(Level, Skill.level_id == Level.id)
-        .where(Skill.id == skill_id, Level.school_id == school_id)
+        .where(
+            Skill.id == skill_id,
+            Skill.is_active.is_(True),
+            Level.school_id == school_id,
+            Level.is_active.is_(True),
+        )
     )
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -79,6 +90,155 @@ def sync_ratings(db: Session, evaluation: Evaluation, ratings: list[tuple[int, i
             db.delete(existing)
 
 
+def should_reevaluate(final_grade: int | None, force: bool = False) -> bool:
+    if force:
+        return True
+    if final_grade is None:
+        return False
+    return final_grade <= REEVALUATION_GRADE_THRESHOLD
+
+
+def _get_open_reevaluation_request(
+    db: Session,
+    instructor_id: int,
+    skill_id: int,
+) -> ReevaluationRequest | None:
+    return db.scalar(
+        select(ReevaluationRequest)
+        .where(
+            ReevaluationRequest.instructor_id == instructor_id,
+            ReevaluationRequest.skill_id == skill_id,
+            ReevaluationRequest.status == ReevaluationStatus.OPEN,
+        )
+    )
+
+
+def _close_pending_reevaluation_requests(
+    db: Session,
+    instructor_id: int,
+    skill_id: int,
+    *,
+    completed_at: datetime | None = None,
+) -> None:
+    pending = db.scalars(
+        select(ReevaluationRequest)
+        .where(
+            ReevaluationRequest.instructor_id == instructor_id,
+            ReevaluationRequest.skill_id == skill_id,
+            ReevaluationRequest.status == ReevaluationStatus.OPEN,
+        )
+    ).all()
+    closed_at = completed_at or datetime.now(timezone.utc)
+    for req in pending:
+        req.status = ReevaluationStatus.COMPLETED
+        req.completed_at = closed_at
+
+
+def clear_reevaluation_for_skill(
+    db: Session,
+    instructor_id: int,
+    skill_id: int,
+    current_evaluation_id: int | None = None,
+) -> None:
+    flagged = db.scalars(
+        select(Evaluation).where(
+            Evaluation.instructor_id == instructor_id,
+            Evaluation.skill_id == skill_id,
+            Evaluation.needs_reevaluation.is_(True),
+        )
+    ).all()
+    for evaluation in flagged:
+        if current_evaluation_id is not None and evaluation.id == current_evaluation_id:
+            continue
+        evaluation.needs_reevaluation = False
+    _close_pending_reevaluation_requests(db, instructor_id, skill_id)
+
+
+def _create_reevaluation_request_if_missing(
+    db: Session,
+    school_id: int,
+    instructor_id: int,
+    supervisor_id: int,
+    skill_id: int,
+    source_evaluation_id: int | None = None,
+    notes: str | None = None,
+) -> ReevaluationRequest:
+    existing = _get_open_reevaluation_request(db, instructor_id, skill_id)
+    if existing:
+        if source_evaluation_id is not None:
+            existing.source_evaluation_id = source_evaluation_id
+        if notes:
+            existing.notes = notes
+        if supervisor_id is not None:
+            existing.supervisor_id = supervisor_id
+        return existing
+    request = ReevaluationRequest(
+        school_id=school_id,
+        instructor_id=instructor_id,
+        supervisor_id=supervisor_id,
+        skill_id=skill_id,
+        source_evaluation_id=source_evaluation_id,
+        notes=notes,
+        status=ReevaluationStatus.OPEN,
+    )
+    db.add(request)
+    return request
+
+
+def recalculate_final_grade(db: Session, evaluation: Evaluation) -> None:
+    avg_rating = db.scalar(
+        select(func.avg(EvaluationRating.rating)).where(EvaluationRating.evaluation_id == evaluation.id)
+    )
+    evaluation.final_grade = None if avg_rating is None else int(round(float(avg_rating)))
+
+
+def sync_reevaluation_state(
+    db: Session,
+    evaluation: Evaluation,
+    force: bool = False,
+    notes: str | None = None,
+) -> None:
+    needs_flag = should_reevaluate(evaluation.final_grade, force)
+    evaluation.needs_reevaluation = needs_flag
+    if needs_flag:
+        clear_reevaluation_for_skill(
+            db,
+            evaluation.instructor_id,
+            evaluation.skill_id,
+            current_evaluation_id=evaluation.id,
+        )
+        _create_reevaluation_request_if_missing(
+            db,
+            school_id=evaluation.school_id,
+            instructor_id=evaluation.instructor_id,
+            supervisor_id=evaluation.supervisor_id,
+            skill_id=evaluation.skill_id,
+            source_evaluation_id=evaluation.id,
+            notes=notes,
+        )
+    else:
+        clear_reevaluation_for_skill(db, evaluation.instructor_id, evaluation.skill_id)
+
+
+def reevaluation_request_row(request: ReevaluationRequest) -> ReevaluationRequestOut:
+    return ReevaluationRequestOut(
+        id=request.id,
+        school_id=request.school_id,
+        instructor_id=request.instructor_id,
+        instructor_name=request.instructor.full_name,
+        supervisor_id=request.supervisor_id,
+        supervisor_name=request.supervisor.full_name if request.supervisor else None,
+        skill_id=request.skill_id,
+        skill_name=request.skill.name,
+        source_evaluation_id=request.source_evaluation_id,
+        needs_reevaluation=request.status == ReevaluationStatus.OPEN,
+        status=request.status,
+        requested_at=request.requested_at,
+        completed_at=request.completed_at,
+        notes=request.notes,
+    )
+
+
 def evaluation_summary_row(evaluation: Evaluation) -> EvaluationSummaryOut:
     level = evaluation.skill.level
     return EvaluationSummaryOut(
@@ -92,6 +252,7 @@ def evaluation_summary_row(evaluation: Evaluation) -> EvaluationSummaryOut:
         skill_id=evaluation.skill_id,
         skill_name=evaluation.skill.name,
         final_grade=evaluation.final_grade,
+        needs_reevaluation=evaluation.needs_reevaluation,
         created_at=evaluation.created_at,
         updated_at=evaluation.updated_at,
     )

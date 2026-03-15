@@ -123,6 +123,7 @@ def seed_two_school_evals(db: Session) -> dict[str, int]:
         skill_id=skill_b.id,
         notes="B notes",
         final_grade=1,
+        needs_reevaluation=True,
         created_at=datetime(2026, 2, 23, 10, 0, tzinfo=timezone.utc),
         updated_at=datetime(2026, 2, 23, 10, 0, tzinfo=timezone.utc),
     )
@@ -477,3 +478,13 @@ def test_sorting_invalid_inputs_still_raise_400(db_session: Session):
         apply_evaluation_sorting(stmt, sort_by="final_grade", sort_dir="sideways")
     assert invalid_sort_dir.value.status_code == 400
     assert invalid_sort_dir.value.detail == "Invalid sort_dir"
+
+
+def test_apply_evaluation_filters_supports_needs_reevaluation(db_session: Session):
+    seeded = seed_two_school_evals(db_session)
+    stmt = evaluation_query_with_joins(seeded["school_b_id"])
+    stmt = apply_evaluation_filters(stmt, needs_reevaluation=True)
+
+    rows = db_session.scalars(stmt).all()
+    assert len(rows) == 1
+    assert rows[0].id == seeded["eval_b_id"]

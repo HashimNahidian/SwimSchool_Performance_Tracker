@@ -64,6 +64,12 @@ function ReportContent({ ev }: { ev: EvaluationDetail }) {
           </div>
         )}
         <div className="report-info-item">
+          <span className="report-info-label">Reevaluation</span>
+          <span className="report-info-value" style={{ color: ev.needs_reevaluation ? "#c2550a" : "#15803d" }}>
+            {ev.needs_reevaluation ? "Required" : "Not Required"}
+          </span>
+        </div>
+        <div className="report-info-item">
           <span className="report-info-label">Evaluation ID</span>
           <span className="report-info-value">#{ev.id}</span>
         </div>

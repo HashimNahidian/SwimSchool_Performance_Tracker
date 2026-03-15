@@ -402,6 +402,105 @@ def test_manager_can_manage_skill_attributes(client: TestClient, db_session: Ses
     assert attr_b.id not in linked_ids3
 
 
+def test_manager_delete_level_archives_level_and_skills_but_keeps_evaluations(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "archive.level.manager@test.local", models.UserRole.MANAGER, school.id)
+    supervisor = create_user(db_session, "Supervisor", "archive.level.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "archive.level.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Archive Me")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Archived Skill")
+    db_session.add(skill)
+    db_session.flush()
+    evaluation = models.Evaluation(
+        school_id=school.id,
+        instructor_id=instructor.id,
+        supervisor_id=supervisor.id,
+        skill_id=skill.id,
+        final_grade=3,
+        notes="should survive",
+    )
+    db_session.add(evaluation)
+    db_session.commit()
+
+    headers = auth_headers(client, "archive.level.manager@test.local")
+    delete_response = client.delete(f"/manager/levels/{level.id}", headers=headers)
+    assert delete_response.status_code == 204
+
+    db_session.refresh(level)
+    db_session.refresh(skill)
+    assert level.is_active is False
+    assert skill.is_active is False
+    assert db_session.get(models.Evaluation, evaluation.id) is not None
+
+    levels_response = client.get("/manager/levels", headers=headers)
+    assert levels_response.status_code == 200
+    assert all(item["id"] != level.id for item in levels_response.json())
+
+    skills_response = client.get("/manager/skills", headers=headers)
+    assert skills_response.status_code == 200
+    assert all(item["id"] != skill.id for item in skills_response.json())
+
+    evaluation_response = client.get(f"/manager/evaluations/{evaluation.id}", headers=headers)
+    assert evaluation_response.status_code == 200
+    assert evaluation_response.json()["skill_name"] == "Archived Skill"
+
+
+def test_manager_delete_attribute_archives_attribute_but_keeps_evaluations(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "archive.attribute.manager@test.local", models.UserRole.MANAGER, school.id)
+    supervisor = create_user(db_session, "Supervisor", "archive.attribute.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "archive.attribute.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Attribute Archive Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Attribute Archive Skill")
+    db_session.add(skill)
+    db_session.flush()
+    attribute = models.Attribute(school_id=school.id, name="Archive Attribute", description="desc")
+    db_session.add(attribute)
+    db_session.flush()
+    db_session.add(models.SkillAttribute(skill_id=skill.id, attribute_id=attribute.id))
+    db_session.flush()
+    evaluation = models.Evaluation(
+        school_id=school.id,
+        instructor_id=instructor.id,
+        supervisor_id=supervisor.id,
+        skill_id=skill.id,
+        final_grade=4,
+        notes="attribute should survive",
+    )
+    db_session.add(evaluation)
+    db_session.flush()
+    db_session.add(
+        models.EvaluationRating(evaluation_id=evaluation.id, attribute_id=attribute.id, rating=4, comment="saved")
+    )
+    db_session.commit()
+
+    headers = auth_headers(client, "archive.attribute.manager@test.local")
+    delete_response = client.delete(f"/manager/attributes/{attribute.id}", headers=headers)
+    assert delete_response.status_code == 204
+
+    db_session.refresh(attribute)
+    assert attribute.is_active is False
+    assert db_session.get(models.Evaluation, evaluation.id) is not None
+
+    attributes_response = client.get("/manager/attributes", headers=headers)
+    assert attributes_response.status_code == 200
+    assert all(item["id"] != attribute.id for item in attributes_response.json())
+
+    skill_attributes_response = client.get(f"/manager/skills/{skill.id}/attributes", headers=headers)
+    assert skill_attributes_response.status_code == 200
+    assert all(item["id"] != attribute.id for item in skill_attributes_response.json())
+
+    evaluation_response = client.get(f"/manager/evaluations/{evaluation.id}", headers=headers)
+    assert evaluation_response.status_code == 200
+    assert evaluation_response.json()["ratings"][0]["attribute_name"] == "Archive Attribute"
+
+
 def test_manager_can_update_user_with_phone(client: TestClient, db_session: Session):
     school = create_school(db_session)
     create_user(db_session, "Manager", "manager5@test.local", models.UserRole.MANAGER, school.id)
@@ -441,3 +540,273 @@ def test_manager_can_delete_user(client: TestClient, db_session: Session):
     assert users_response.status_code == 200
     emails = [item["email"] for item in users_response.json()]
     assert "delete.me@test.local" not in emails
+
+
+def test_low_grade_evaluation_creates_reevaluation_request(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Supervisor", "reeval.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "reeval.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Reeval Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Reeval Skill")
+    db_session.add(skill)
+    db_session.flush()
+    attr_a = models.Attribute(school_id=school.id, name="Consistency", description="desc")
+    attr_b = models.Attribute(school_id=school.id, name="Technique", description="desc")
+    db_session.add_all([attr_a, attr_b])
+    db_session.flush()
+    db_session.add_all(
+        [
+            models.SkillAttribute(skill_id=skill.id, attribute_id=attr_a.id),
+            models.SkillAttribute(skill_id=skill.id, attribute_id=attr_b.id),
+        ]
+    )
+    db_session.commit()
+
+    headers = auth_headers(client, "reeval.supervisor@test.local")
+    response = client.post(
+        "/supervisor/evaluations",
+        headers=headers,
+        json={
+            "instructor_id": instructor.id,
+            "skill_id": skill.id,
+            "notes": "Needs extra work",
+            "ratings": [
+                {"attribute_id": attr_a.id, "rating": 1},
+                {"attribute_id": attr_b.id, "rating": 2},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["final_grade"] == 2
+    assert payload["needs_reevaluation"] is True
+
+    evaluation = db_session.get(models.Evaluation, payload["id"])
+    assert evaluation is not None
+    assert evaluation.needs_reevaluation is True
+
+    request = db_session.query(models.ReevaluationRequest).filter_by(
+        instructor_id=instructor.id,
+        skill_id=skill.id,
+        status=models.ReevaluationStatus.OPEN,
+    ).one()
+    assert request.source_evaluation_id == evaluation.id
+    assert request.notes == "Needs extra work"
+
+    flagged = client.get("/supervisor/evaluations?needs_reevaluation=true", headers=headers)
+    assert flagged.status_code == 200
+    flagged_payload = flagged.json()
+    assert len(flagged_payload) == 1
+    assert flagged_payload[0]["id"] == evaluation.id
+
+
+def test_follow_up_evaluation_closes_open_reevaluation_request(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Supervisor", "reeval2.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "reeval2.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Follow Up Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Follow Up Skill")
+    db_session.add(skill)
+    db_session.flush()
+    attr = models.Attribute(school_id=school.id, name="Control", description="desc")
+    db_session.add(attr)
+    db_session.flush()
+    db_session.add(models.SkillAttribute(skill_id=skill.id, attribute_id=attr.id))
+    db_session.commit()
+
+    headers = auth_headers(client, "reeval2.supervisor@test.local")
+    first = client.post(
+        "/supervisor/evaluations",
+        headers=headers,
+        json={
+            "instructor_id": instructor.id,
+            "skill_id": skill.id,
+            "ratings": [{"attribute_id": attr.id, "rating": 2}],
+            "notes": "Needs follow up",
+        },
+    )
+    assert first.status_code == 200, first.text
+
+    first_request = db_session.query(models.ReevaluationRequest).filter_by(
+        instructor_id=instructor.id,
+        skill_id=skill.id,
+        status=models.ReevaluationStatus.OPEN,
+    ).one()
+
+    second = client.post(
+        "/supervisor/evaluations",
+        headers=headers,
+        json={
+            "instructor_id": instructor.id,
+            "skill_id": skill.id,
+            "ratings": [{"attribute_id": attr.id, "rating": 4}],
+            "notes": "Improved",
+        },
+    )
+    assert second.status_code == 200, second.text
+    second_payload = second.json()
+    assert second_payload["final_grade"] == 4
+    assert second_payload["needs_reevaluation"] is False
+
+    first_evaluation = db_session.get(models.Evaluation, first.json()["id"])
+    assert first_evaluation is not None
+    assert first_evaluation.needs_reevaluation is False
+
+    db_session.refresh(first_request)
+    assert first_request.status == models.ReevaluationStatus.COMPLETED
+    assert first_request.completed_at is not None
+    assert db_session.query(models.ReevaluationRequest).filter_by(
+        instructor_id=instructor.id,
+        skill_id=skill.id,
+        status=models.ReevaluationStatus.OPEN,
+    ).count() == 0
+
+    flagged = client.get("/supervisor/evaluations?needs_reevaluation=true", headers=headers)
+    assert flagged.status_code == 200
+    assert flagged.json() == []
+
+
+def test_updating_evaluation_to_passing_grade_completes_reevaluation_request(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "reeval.manager@test.local", models.UserRole.MANAGER, school.id)
+    supervisor = create_user(db_session, "Supervisor", "reeval.update.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "reeval.update.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Update Reeval Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Update Reeval Skill")
+    db_session.add(skill)
+    db_session.flush()
+    attr = models.Attribute(school_id=school.id, name="Recovery", description="desc")
+    db_session.add(attr)
+    db_session.flush()
+    db_session.add(models.SkillAttribute(skill_id=skill.id, attribute_id=attr.id))
+    db_session.commit()
+
+    supervisor_headers = auth_headers(client, "reeval.update.supervisor@test.local")
+    created = client.post(
+        "/supervisor/evaluations",
+        headers=supervisor_headers,
+        json={
+            "instructor_id": instructor.id,
+            "skill_id": skill.id,
+            "needs_reevaluation": True,
+            "notes": "Manager should follow up",
+            "ratings": [{"attribute_id": attr.id, "rating": 2}],
+        },
+    )
+    assert created.status_code == 200, created.text
+    created_payload = created.json()
+    assert created_payload["needs_reevaluation"] is True
+
+    request = db_session.query(models.ReevaluationRequest).filter_by(
+        instructor_id=instructor.id,
+        skill_id=skill.id,
+        status=models.ReevaluationStatus.OPEN,
+    ).one()
+
+    manager_headers = auth_headers(client, "reeval.manager@test.local")
+    updated = client.put(
+        f"/manager/evaluations/{created_payload['id']}",
+        headers=manager_headers,
+        json={
+            "notes": "Improved enough",
+            "ratings": [{"attribute_id": attr.id, "rating": 4}],
+            "needs_reevaluation": False,
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    updated_payload = updated.json()
+    assert updated_payload["final_grade"] == 4
+    assert updated_payload["needs_reevaluation"] is False
+
+    evaluation = db_session.get(models.Evaluation, created_payload["id"])
+    assert evaluation is not None
+    assert evaluation.needs_reevaluation is False
+
+    db_session.refresh(request)
+    assert request.status == models.ReevaluationStatus.COMPLETED
+    assert request.completed_at is not None
+
+
+def test_manager_can_delete_evaluation_and_missing_returns_404(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "delete.eval.manager@test.local", models.UserRole.MANAGER, school.id)
+    supervisor = create_user(db_session, "Supervisor", "delete.eval.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "delete.eval.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Delete Eval Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Delete Eval Skill")
+    db_session.add(skill)
+    db_session.flush()
+    evaluation = models.Evaluation(
+        school_id=school.id,
+        instructor_id=instructor.id,
+        supervisor_id=supervisor.id,
+        skill_id=skill.id,
+        final_grade=3,
+        notes="delete me",
+    )
+    db_session.add(evaluation)
+    db_session.commit()
+
+    headers = auth_headers(client, "delete.eval.manager@test.local")
+
+    missing = client.delete("/manager/evaluations/999999", headers=headers)
+    assert missing.status_code == 404
+
+    deleted = client.delete(f"/manager/evaluations/{evaluation.id}", headers=headers)
+    assert deleted.status_code == 204
+    assert db_session.get(models.Evaluation, evaluation.id) is None
+
+
+def test_manager_evaluations_can_filter_needs_reevaluation(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "manager.reeval@test.local", models.UserRole.MANAGER, school.id)
+    supervisor = create_user(db_session, "Supervisor", "manager.reeval.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "manager.reeval.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Manager Reeval Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Manager Reeval Skill")
+    db_session.add(skill)
+    db_session.flush()
+
+    flagged = models.Evaluation(
+        school_id=school.id,
+        instructor_id=instructor.id,
+        supervisor_id=supervisor.id,
+        skill_id=skill.id,
+        final_grade=2,
+        needs_reevaluation=True,
+        notes="flagged",
+    )
+    clear = models.Evaluation(
+        school_id=school.id,
+        instructor_id=instructor.id,
+        supervisor_id=supervisor.id,
+        skill_id=skill.id,
+        final_grade=4,
+        needs_reevaluation=False,
+        notes="clear",
+    )
+    db_session.add_all([flagged, clear])
+    db_session.commit()
+
+    headers = auth_headers(client, "manager.reeval@test.local")
+    response = client.get("/manager/evaluations?needs_reevaluation=true", headers=headers)
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["id"] == flagged.id
+    assert payload[0]["needs_reevaluation"] is True

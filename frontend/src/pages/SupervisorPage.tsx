@@ -1,18 +1,35 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth";
 import {
+  completeSupervisorReevaluation,
   createSupervisorEvaluation,
   getSupervisorEvaluationDetail,
   listSupervisorEvaluations,
   listSupervisorInstructors,
   listSupervisorLevels,
+  listSupervisorReevaluations,
   listSupervisorSkillAttributes,
   listSupervisorSkills,
 } from "../api";
-import type { Attribute, EvaluationDetail, EvaluationSummary, Level, Skill, User } from "../types";
+import type {
+  Attribute,
+  EvaluationDetail,
+  EvaluationSummary,
+  Level,
+  ReevaluationRequest,
+  Skill,
+  User,
+} from "../types";
 import { EvaluationTable } from "../components/EvaluationTable";
 import { EvaluationReportModal } from "../components/EvaluationReport";
 import { EvaluationEditModal } from "../components/EvaluationEditModal";
+
+type ReevaluationPrefill = {
+  evaluationId: number;
+  instructorId: number;
+  skillId: number;
+};
+
 export function SupervisorPage() {
   const { token, user } = useAuth();
   const [error, setError] = useState("");
@@ -20,28 +37,48 @@ export function SupervisorPage() {
   const [levels, setLevels] = useState<Level[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
+  const [reevaluations, setReevaluations] = useState<ReevaluationRequest[]>([]);
   const [showCreate, setShowCreate] = useState(false);
-
+  const [needsReevalMode, setNeedsReevalMode] = useState(false);
+  const [reevaluationPrefill, setReevaluationPrefill] = useState<ReevaluationPrefill | null>(null);
   const [reportEval, setReportEval] = useState<EvaluationDetail | null>(null);
   const [editEval, setEditEval] = useState<EvaluationDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [filters, setFilters] = useState({
+    instructorId: "",
+    skillId: "",
+    needsReevaluationOnly: false,
+  });
 
   useEffect(() => {
     if (!token) return;
-    Promise.all([listSupervisorInstructors(token), listSupervisorLevels(token), listSupervisorSkills(token), listSupervisorEvaluations(token)])
-      .then(([u, l, s, e]) => {
+    Promise.all([
+      listSupervisorInstructors(token),
+      listSupervisorLevels(token),
+      listSupervisorSkills(token),
+      listSupervisorEvaluations(token),
+      listSupervisorReevaluations(token),
+    ])
+      .then(([u, l, s, e, r]) => {
         setUsers(u);
         setLevels(l);
         setSkills(s);
         setEvaluations(e);
+        setReevaluations(r);
       })
       .catch((e: Error) => setError(e.message));
   }, [token]);
 
-  function refreshEvaluations() {
+  function refreshData() {
     if (!token) return;
-    listSupervisorEvaluations(token)
-      .then((e) => setEvaluations(e))
+    Promise.all([
+      listSupervisorEvaluations(token),
+      listSupervisorReevaluations(token),
+    ])
+      .then(([e, r]) => {
+        setEvaluations(e);
+        setReevaluations(r);
+      })
       .catch((e: Error) => setError(e.message));
   }
 
@@ -58,35 +95,75 @@ export function SupervisorPage() {
     }
   }
 
+  async function handleCompleteReevaluation(id: number) {
+    if (!token) return;
+    try {
+      await completeSupervisorReevaluation(token, id);
+      refreshData();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   function handleSaved(updated: EvaluationDetail) {
-    setEvaluations((prev) => prev.map((e) => (e.id === updated.id ? { ...e } : e)));
+    setEvaluations((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+    refreshData();
     setEditEval(null);
   }
 
-  function handleSubmitted(updated: EvaluationDetail) {
-    setEvaluations((prev) => prev.map((e) => (e.id === updated.id ? { ...e } : e)));
-    setEditEval(null);
-  }
-
-  const { instructorCount, total } = useMemo(() => {
-    const instructors = new Set<string>();
-    for (const r of evaluations) {
-      instructors.add(r.instructor_name);
+  const { instructorCount, total, flaggedCount } = useMemo(() => {
+    const instructors = new Set<number>();
+    let flagged = 0;
+    for (const row of evaluations) {
+      instructors.add(row.instructor_id);
+      if (row.needs_reevaluation) flagged += 1;
     }
     return {
       instructorCount: instructors.size,
       total: evaluations.length,
+      flaggedCount: flagged,
     };
   }, [evaluations]);
 
-  const allRows = useMemo(() => {
-    return [...evaluations].sort((a, b) => {
-      const dateA = new Date(a.created_at).getTime();
-      const dateB = new Date(b.created_at).getTime();
-      if (dateA !== dateB) return dateB - dateA;
-      return b.id - a.id;
+  const filteredRows = useMemo(() => {
+    return [...evaluations]
+      .filter((row) => {
+        if (filters.instructorId && row.instructor_id !== Number(filters.instructorId)) return false;
+        if (filters.skillId && row.skill_id !== Number(filters.skillId)) return false;
+        if (filters.needsReevaluationOnly && !row.needs_reevaluation) return false;
+        if (needsReevalMode && !row.needs_reevaluation) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const dateA = new Date(a.created_at).getTime();
+        const dateB = new Date(b.created_at).getTime();
+        if (dateA !== dateB) return dateB - dateA;
+        return b.id - a.id;
+      });
+  }, [evaluations, filters]);
+
+  const filteredReevaluations = useMemo(() => {
+    return reevaluations.filter((row) => {
+      if (filters.instructorId && row.instructor_id !== Number(filters.instructorId)) return false;
+      if (filters.skillId && row.skill_id !== Number(filters.skillId)) return false;
+      return true;
     });
-  }, [evaluations]);
+  }, [reevaluations, filters]);
+
+  function openCreateEvaluation(prefill: ReevaluationPrefill | null = null) {
+    setReevaluationPrefill(prefill);
+    setShowCreate(true);
+  }
+
+  function handleReevaluate(evaluationId: number) {
+    const row = evaluations.find((item) => item.id === evaluationId);
+    if (!row) return;
+    openCreateEvaluation({
+      evaluationId: row.id,
+      instructorId: row.instructor_id,
+      skillId: row.skill_id,
+    });
+  }
 
   if (!token) return null;
 
@@ -108,8 +185,92 @@ export function SupervisorPage() {
           <div className="stat-card-value" style={{ color: "#0f9b8e" }}>{instructorCount}</div>
           <div className="stat-card-label">Instructors Evaluated</div>
         </div>
+        <button
+          type="button"
+          className="stat-card"
+          onClick={() => setNeedsReevalMode((prev) => !prev)}
+          style={{
+            textAlign: "left",
+            border: needsReevalMode ? "2px solid #c2550a" : "none",
+            cursor: "pointer",
+            background: needsReevalMode ? "#fff7ed" : undefined,
+          }}
+        >
+          <div className="stat-card-value" style={{ color: "#c2550a" }}>{flaggedCount}</div>
+          <div className="stat-card-label">
+            Needs Reevaluation
+            {needsReevalMode ? " (Filtered)" : ""}
+          </div>
+        </button>
       </div>
 
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h2 style={{ marginBottom: 12 }}>Needs Reevaluation</h2>
+        <div className="form inline" style={{ marginBottom: 12 }}>
+          <select
+            value={filters.instructorId}
+            onChange={(e) => setFilters((prev) => ({ ...prev, instructorId: e.target.value }))}
+          >
+            <option value="">All instructors</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.full_name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filters.skillId}
+            onChange={(e) => setFilters((prev) => ({ ...prev, skillId: e.target.value }))}
+          >
+            <option value="">All skills</option>
+            {skills.map((skill) => (
+              <option key={skill.id} value={skill.id}>
+                {skill.name}
+              </option>
+            ))}
+          </select>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
+            <input
+              type="checkbox"
+              checked={filters.needsReevaluationOnly}
+              onChange={(e) => setFilters((prev) => ({ ...prev, needsReevaluationOnly: e.target.checked }))}
+              style={{ width: "auto" }}
+            />
+            Show only flagged evaluations
+          </label>
+        </div>
+
+        {filteredReevaluations.length > 0 ? (
+          <table>
+            <thead>
+              <tr>
+                <th>Instructor</th>
+                <th>Skill</th>
+                <th>Requested</th>
+                <th>Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredReevaluations.map((request) => (
+                <tr key={request.id}>
+                  <td>{request.instructor_name}</td>
+                  <td>{request.skill_name}</td>
+                  <td>{new Date(request.requested_at).toLocaleDateString()}</td>
+                  <td>{request.notes || "—"}</td>
+                  <td>
+                    <button type="button" onClick={() => handleCompleteReevaluation(request.id)}>
+                      Mark Complete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p style={{ color: "#64748b", fontSize: 14 }}>No open reevaluation requests for the current filters.</p>
+        )}
+      </div>
 
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -117,18 +278,31 @@ export function SupervisorPage() {
             Evaluations
             {loadingDetail && <span style={{ fontSize: 13, color: "#64748b", fontWeight: 400, marginLeft: 8 }}>Loading...</span>}
           </h2>
-          <button className="btn-add" onClick={() => setShowCreate((p) => !p)}>
+          <button
+            className="btn-add"
+            onClick={() => {
+              setReevaluationPrefill(null);
+              setShowCreate((p) => !p);
+            }}
+          >
             {showCreate ? "Cancel" : "+ New Evaluation"}
           </button>
         </div>
 
+        {needsReevalMode && (
+          <p style={{ marginTop: -4, marginBottom: 14, color: "#c2550a", fontWeight: 600 }}>
+            Showing only evaluations that need reevaluation.
+          </p>
+        )}
+
         <EvaluationTable
-          rows={allRows}
+          rows={filteredRows}
           onView={(id) => openDetail(id, "view")}
           onEdit={(id) => openDetail(id, "edit")}
+          onReevaluate={handleReevaluate}
         />
-        {allRows.length === 0 && (
-          <p style={{ color: "#64748b", fontSize: 14, paddingTop: 8 }}>No evaluations yet.</p>
+        {filteredRows.length === 0 && (
+          <p style={{ color: "#64748b", fontSize: 14, paddingTop: 8 }}>No evaluations match the current filters.</p>
         )}
       </div>
 
@@ -138,9 +312,15 @@ export function SupervisorPage() {
           users={users}
           levels={levels}
           skills={skills}
+          prefill={reevaluationPrefill}
           onCreated={() => {
-            refreshEvaluations();
+            refreshData();
             setShowCreate(false);
+            setReevaluationPrefill(null);
+          }}
+          onCancel={() => {
+            setShowCreate(false);
+            setReevaluationPrefill(null);
           }}
         />
       )}
@@ -152,7 +332,7 @@ export function SupervisorPage() {
           token={token}
           evaluation={editEval}
           onSaved={handleSaved}
-          onSubmitted={handleSubmitted}
+          onSubmitted={handleSaved}
           onClose={() => setEditEval(null)}
         />
       )}
@@ -173,22 +353,28 @@ function SupervisorCreateEvaluation({
   users,
   levels,
   skills,
+  prefill,
   onCreated,
+  onCancel,
 }: {
   token: string;
   users: User[];
   levels: Level[];
   skills: Skill[];
+  prefill: ReevaluationPrefill | null;
   onCreated: () => void;
+  onCancel: () => void;
 }) {
   const [instructorId, setInstructorId] = useState<number>(users[0]?.id ?? 0);
   const [levelId, setLevelId] = useState<number>(levels[0]?.id ?? 0);
   const [skillId, setSkillId] = useState<number>(0);
   const [notes, setNotes] = useState("");
+  const [needsReevaluation, setNeedsReevaluation] = useState(false);
   const [error, setError] = useState("");
   const [attributes, setAttributes] = useState<Attribute[]>([]);
   const [ratings, setRatings] = useState<Record<number, number>>({});
   const levelSkills = useMemo(() => skills.filter((x) => x.level_id === levelId), [skills, levelId]);
+  const isReevaluation = prefill !== null;
 
   useEffect(() => {
     if (users.length > 0 && !instructorId) setInstructorId(users[0].id);
@@ -199,8 +385,24 @@ function SupervisorCreateEvaluation({
   }, [levelId, levels]);
 
   useEffect(() => {
-    if (levelSkills.length > 0) setSkillId(levelSkills[0].id);
-  }, [levelSkills]);
+    if (levelSkills.length === 0) {
+      setSkillId(0);
+      return;
+    }
+    if (!levelSkills.some((skill) => skill.id === skillId)) {
+      setSkillId(levelSkills[0].id);
+    }
+  }, [levelSkills, skillId]);
+
+  useEffect(() => {
+    if (!prefill) return;
+    setInstructorId(prefill.instructorId);
+    setSkillId(prefill.skillId);
+    const skill = skills.find((item) => item.id === prefill.skillId);
+    if (skill) {
+      setLevelId(skill.level_id);
+    }
+  }, [prefill, skills]);
 
   useEffect(() => {
     if (!skillId) return;
@@ -229,8 +431,10 @@ function SupervisorCreateEvaluation({
           attribute_id: Number(id),
           rating: value,
         })),
+        needs_reevaluation: needsReevaluation,
       });
       setNotes("");
+      setNeedsReevaluation(false);
       onCreated();
     } catch (err) {
       setError((err as Error).message);
@@ -239,7 +443,15 @@ function SupervisorCreateEvaluation({
 
   return (
     <div className="card">
-      <h2>Create Evaluation</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <h2 style={{ marginBottom: 0 }}>{isReevaluation ? "Reevaluate Instructor" : "Create Evaluation"}</h2>
+        <button type="button" className="btn-add" onClick={onCancel}>Cancel</button>
+      </div>
+      {isReevaluation && (
+        <p style={{ marginTop: 10, color: "#64748b", fontSize: 14 }}>
+          Submit a follow-up evaluation for this flagged skill.
+        </p>
+      )}
       <form className="form" onSubmit={onSubmit}>
         <label>
           Instructor
@@ -304,6 +516,16 @@ function SupervisorCreateEvaluation({
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Optional coaching notes..."
           />
+        </label>
+
+        <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 600 }}>
+          <input
+            type="checkbox"
+            checked={needsReevaluation}
+            onChange={(e) => setNeedsReevaluation(e.target.checked)}
+            style={{ width: "auto" }}
+          />
+          Create explicit reevaluation request
         </label>
 
         {error && <p className="error">{error}</p>}

@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from models import UserRole
+from models import ReevaluationStatus, UserRole
 
 
 class TokenResponse(BaseModel):
@@ -68,6 +68,7 @@ class LevelOut(BaseModel):
     id: int
     name: str
     sort_order: int
+    is_active: bool
 
 
 # ── Skills ───────────────────────────────────────────────────────────────────
@@ -91,6 +92,7 @@ class SkillOut(BaseModel):
     level_id: int
     name: str
     sort_order: int
+    is_active: bool
 
 
 # ── Attributes ───────────────────────────────────────────────────────────────
@@ -119,6 +121,7 @@ class AttributeOut(BaseModel):
     name: str
     description: str | None
     sort_order: int
+    is_active: bool
 
 
 # ── Skill ↔ Attribute links ───────────────────────────────────────────────────
@@ -140,11 +143,13 @@ class EvaluationCreate(BaseModel):
     skill_id: int
     notes: str | None = None
     ratings: list[RatingIn] = Field(default_factory=list)
+    needs_reevaluation: bool = False
 
 
 class EvaluationUpdate(BaseModel):
     notes: str | None = None
     ratings: list[RatingIn] | None = None
+    needs_reevaluation: bool | None = None
 
 
 class EvaluationSummaryOut(BaseModel):
@@ -158,6 +163,7 @@ class EvaluationSummaryOut(BaseModel):
     skill_id: int
     skill_name: str
     final_grade: int | None
+    needs_reevaluation: bool
     created_at: datetime
     updated_at: datetime
 
@@ -174,11 +180,31 @@ class EvaluationDetailOut(EvaluationSummaryOut):
     ratings: list[RatingOut]
 
 
+class ReevaluationRequestOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    school_id: int
+    instructor_id: int
+    instructor_name: str
+    supervisor_id: int | None
+    supervisor_name: str | None
+    skill_id: int
+    skill_name: str
+    source_evaluation_id: int | None
+    needs_reevaluation: bool
+    status: ReevaluationStatus
+    requested_at: datetime
+    completed_at: datetime | None
+    notes: str | None
+
+
 class EvaluationFilterIn(BaseModel):
     instructor_id: int | None = None
     supervisor_id: int | None = None
     skill_id: int | None = None
     final_grade: int | None = Field(default=None, ge=1, le=5)
+    needs_reevaluation: bool | None = None
     date_from: date | None = None
     date_to: date | None = None
     sort_by: str | None = None
