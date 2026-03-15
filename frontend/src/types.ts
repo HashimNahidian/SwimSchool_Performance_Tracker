@@ -20,6 +20,7 @@ export type Level = {
   id: number;
   name: string;
   sort_order: number;
+  is_active: boolean;
 };
 
 export type Skill = {
@@ -27,6 +28,7 @@ export type Skill = {
   level_id: number;
   name: string;
   sort_order: number;
+  is_active: boolean;
 };
 
 export type Attribute = {
@@ -35,6 +37,7 @@ export type Attribute = {
   name: string;
   description: string | null;
   sort_order: number;
+  is_active: boolean;
 };
 
 export type EvaluationSummary = {
@@ -48,6 +51,7 @@ export type EvaluationSummary = {
   skill_id: number;
   skill_name: string;
   final_grade: number | null;
+  needs_reevaluation: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -62,4 +66,23 @@ export type RatingOut = {
 export type EvaluationDetail = EvaluationSummary & {
   notes: string | null;
   ratings: RatingOut[];
+};
+
+export type ReevaluationStatus = "OPEN" | "COMPLETED" | "CANCELED";
+
+export type ReevaluationRequest = {
+  id: number;
+  school_id: number;
+  instructor_id: number;
+  instructor_name: string;
+  supervisor_id: number | null;
+  supervisor_name: string | null;
+  skill_id: number;
+  skill_name: string;
+  source_evaluation_id: number | null;
+  needs_reevaluation: boolean;
+  status: ReevaluationStatus;
+  requested_at: string;
+  completed_at: string | null;
+  notes: string | null;
 };

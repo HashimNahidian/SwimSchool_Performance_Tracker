@@ -1,12 +1,12 @@
 import logging
 import smtplib
-from datetime import date
+from datetime import date, datetime, timezone
 from email.message import EmailMessage
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import asc, desc, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from config import settings
 from db import get_db
@@ -14,8 +14,9 @@ from deps import require_roles
 from models import (
     Attribute,
     Evaluation,
-    EvaluationRating,
     Level,
+    ReevaluationRequest,
+    ReevaluationStatus,
     Skill,
     SkillAttribute,
     User,
@@ -26,6 +27,7 @@ from schemas import (
     AttributeOut,
     AttributeUpdate,
     EvaluationDetailOut,
+    ReevaluationRequestOut,
     EvaluationSummaryOut,
     EvaluationUpdate,
     LevelBase,
@@ -46,7 +48,10 @@ from services import (
     evaluation_query_with_joins,
     evaluation_summary_row,
     evaluations_to_csv,
+    recalculate_final_grade,
+    reevaluation_request_row,
     sync_ratings,
+    sync_reevaluation_state,
 )
 
 
@@ -62,6 +67,7 @@ def apply_evaluation_filters(
     supervisor_id: int | None = None,
     skill_id: int | None = None,
     final_grade: int | None = None,
+    needs_reevaluation: bool | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
 ):
@@ -74,6 +80,8 @@ def apply_evaluation_filters(
         filters.append(Evaluation.skill_id == skill_id)
     if final_grade is not None:
         filters.append(Evaluation.final_grade == final_grade)
+    if needs_reevaluation is not None:
+        filters.append(Evaluation.needs_reevaluation.is_(needs_reevaluation))
     if date_from:
         filters.append(Evaluation.created_at >= date_from)
     if date_to:
@@ -239,7 +247,9 @@ def list_levels(
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> list[Level]:
     return db.scalars(
-        select(Level).where(Level.school_id == current_user.school_id).order_by(Level.sort_order.asc(), Level.name.asc())
+        select(Level)
+        .where(Level.school_id == current_user.school_id, Level.is_active.is_(True))
+        .order_by(Level.sort_order.asc(), Level.name.asc())
     ).all()
 
 
@@ -263,7 +273,13 @@ def update_level(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> Level:
-    level = db.scalar(select(Level).where(Level.id == level_id, Level.school_id == current_user.school_id))
+    level = db.scalar(
+        select(Level).where(
+            Level.id == level_id,
+            Level.school_id == current_user.school_id,
+            Level.is_active.is_(True),
+        )
+    )
     if not level:
         raise HTTPException(status_code=404, detail="Level not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -279,18 +295,19 @@ def delete_level(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> None:
-    level = db.scalar(select(Level).where(Level.id == level_id, Level.school_id == current_user.school_id))
+    level = db.scalar(
+        select(Level).where(
+            Level.id == level_id,
+            Level.school_id == current_user.school_id,
+            Level.is_active.is_(True),
+        )
+    )
     if not level:
         raise HTTPException(status_code=404, detail="Level not found")
-    try:
-        db.delete(level)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail="Level cannot be deleted because it is referenced by existing skills or evaluations",
-        ) from exc
+    level.is_active = False
+    for skill in db.scalars(select(Skill).where(Skill.level_id == level.id)).all():
+        skill.is_active = False
+    db.commit()
 
 
 # ── Skills ────────────────────────────────────────────────────────────────────
@@ -304,7 +321,11 @@ def list_skills(
     stmt = (
         select(Skill)
         .join(Level, Skill.level_id == Level.id)
-        .where(Level.school_id == current_user.school_id)
+        .where(
+            Level.school_id == current_user.school_id,
+            Level.is_active.is_(True),
+            Skill.is_active.is_(True),
+        )
     )
     if level_id:
         stmt = stmt.where(Skill.level_id == level_id)
@@ -317,7 +338,13 @@ def create_skill(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> Skill:
-    level = db.scalar(select(Level).where(Level.id == payload.level_id, Level.school_id == current_user.school_id))
+    level = db.scalar(
+        select(Level).where(
+            Level.id == payload.level_id,
+            Level.school_id == current_user.school_id,
+            Level.is_active.is_(True),
+        )
+    )
     if not level:
         raise HTTPException(status_code=404, detail="Level not found")
     skill = Skill(
@@ -341,13 +368,22 @@ def update_skill(
     skill = db.scalar(
         select(Skill)
         .join(Level, Skill.level_id == Level.id)
-        .where(Skill.id == skill_id, Level.school_id == current_user.school_id)
+        .where(
+            Skill.id == skill_id,
+            Skill.is_active.is_(True),
+            Level.school_id == current_user.school_id,
+            Level.is_active.is_(True),
+        )
     )
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     updates = payload.model_dump(exclude_unset=True)
     if "level_id" in updates and not db.scalar(
-        select(Level).where(Level.id == updates["level_id"], Level.school_id == current_user.school_id)
+        select(Level).where(
+            Level.id == updates["level_id"],
+            Level.school_id == current_user.school_id,
+            Level.is_active.is_(True),
+        )
     ):
         raise HTTPException(status_code=404, detail="Level not found")
     for field, value in updates.items():
@@ -366,19 +402,17 @@ def delete_skill(
     skill = db.scalar(
         select(Skill)
         .join(Level, Skill.level_id == Level.id)
-        .where(Skill.id == skill_id, Level.school_id == current_user.school_id)
+        .where(
+            Skill.id == skill_id,
+            Skill.is_active.is_(True),
+            Level.school_id == current_user.school_id,
+            Level.is_active.is_(True),
+        )
     )
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    try:
-        db.delete(skill)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail="Skill cannot be deleted because it is referenced by existing evaluations",
-        ) from exc
+    skill.is_active = False
+    db.commit()
 
 
 # ── Skill ↔ Attribute links ───────────────────────────────────────────────────
@@ -392,14 +426,19 @@ def list_skill_attributes(
     skill = db.scalar(
         select(Skill)
         .join(Level, Skill.level_id == Level.id)
-        .where(Skill.id == skill_id, Level.school_id == current_user.school_id)
+        .where(
+            Skill.id == skill_id,
+            Skill.is_active.is_(True),
+            Level.school_id == current_user.school_id,
+            Level.is_active.is_(True),
+        )
     )
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     return db.scalars(
         select(Attribute)
         .join(SkillAttribute, Attribute.id == SkillAttribute.attribute_id)
-        .where(SkillAttribute.skill_id == skill_id)
+        .where(SkillAttribute.skill_id == skill_id, Attribute.is_active.is_(True))
         .order_by(Attribute.sort_order.asc(), Attribute.name.asc())
     ).all()
 
@@ -414,12 +453,21 @@ def add_skill_attribute(
     skill = db.scalar(
         select(Skill)
         .join(Level, Skill.level_id == Level.id)
-        .where(Skill.id == skill_id, Level.school_id == current_user.school_id)
+        .where(
+            Skill.id == skill_id,
+            Skill.is_active.is_(True),
+            Level.school_id == current_user.school_id,
+            Level.is_active.is_(True),
+        )
     )
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     attribute = db.scalar(
-        select(Attribute).where(Attribute.id == payload.attribute_id, Attribute.school_id == current_user.school_id)
+        select(Attribute).where(
+            Attribute.id == payload.attribute_id,
+            Attribute.school_id == current_user.school_id,
+            Attribute.is_active.is_(True),
+        )
     )
     if not attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
@@ -445,7 +493,12 @@ def remove_skill_attribute(
     skill = db.scalar(
         select(Skill)
         .join(Level, Skill.level_id == Level.id)
-        .where(Skill.id == skill_id, Level.school_id == current_user.school_id)
+        .where(
+            Skill.id == skill_id,
+            Skill.is_active.is_(True),
+            Level.school_id == current_user.school_id,
+            Level.is_active.is_(True),
+        )
     )
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -470,7 +523,7 @@ def list_attributes(
 ) -> list[Attribute]:
     return db.scalars(
         select(Attribute)
-        .where(Attribute.school_id == current_user.school_id)
+        .where(Attribute.school_id == current_user.school_id, Attribute.is_active.is_(True))
         .order_by(Attribute.sort_order.asc(), Attribute.name.asc())
     ).all()
 
@@ -505,7 +558,11 @@ def update_attribute(
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> Attribute:
     attribute = db.scalar(
-        select(Attribute).where(Attribute.id == attribute_id, Attribute.school_id == current_user.school_id)
+        select(Attribute).where(
+            Attribute.id == attribute_id,
+            Attribute.school_id == current_user.school_id,
+            Attribute.is_active.is_(True),
+        )
     )
     if not attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
@@ -523,19 +580,16 @@ def delete_attribute(
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> None:
     attribute = db.scalar(
-        select(Attribute).where(Attribute.id == attribute_id, Attribute.school_id == current_user.school_id)
+        select(Attribute).where(
+            Attribute.id == attribute_id,
+            Attribute.school_id == current_user.school_id,
+            Attribute.is_active.is_(True),
+        )
     )
     if not attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
-    try:
-        db.delete(attribute)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail="Attribute cannot be deleted because it is referenced by existing ratings",
-        ) from exc
+    attribute.is_active = False
+    db.commit()
 
 
 # ── Evaluations ───────────────────────────────────────────────────────────────
@@ -573,6 +627,14 @@ def update_evaluation(
     evaluation.notes = payload.notes
     if payload.ratings is not None:
         sync_ratings(db, evaluation, [(r.attribute_id, r.rating, r.comment) for r in payload.ratings])
+    db.flush()
+    recalculate_final_grade(db, evaluation)
+    sync_reevaluation_state(
+        db,
+        evaluation,
+        force=bool(payload.needs_reevaluation),
+        notes=payload.notes,
+    )
     db.commit()
 
     full = db.scalar(evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation.id))
@@ -581,12 +643,31 @@ def update_evaluation(
     return evaluation_detail_row(full)
 
 
+@router.delete("/evaluations/{evaluation_id}", status_code=204, dependencies=[manager_guard])
+def delete_evaluation(
+    evaluation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> None:
+    evaluation = db.scalar(
+        select(Evaluation).where(
+            Evaluation.id == evaluation_id,
+            Evaluation.school_id == current_user.school_id,
+        )
+    )
+    if not evaluation:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    db.delete(evaluation)
+    db.commit()
+
+
 @router.get("/evaluations", response_model=list[EvaluationSummaryOut], dependencies=[manager_guard])
 def list_evaluations(
     instructor_id: int | None = None,
     supervisor_id: int | None = None,
     skill_id: int | None = None,
     final_grade: int | None = Query(default=None, ge=1, le=5),
+    needs_reevaluation: bool | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
     sort_by: str = Query(default="created_at"),
@@ -603,6 +684,7 @@ def list_evaluations(
         supervisor_id=supervisor_id,
         skill_id=skill_id,
         final_grade=final_grade,
+        needs_reevaluation=needs_reevaluation,
         date_from=date_from,
         date_to=date_to,
     )
@@ -611,12 +693,83 @@ def list_evaluations(
     return [evaluation_summary_row(item) for item in evaluations]
 
 
+@router.get("/reevaluations", response_model=list[ReevaluationRequestOut], dependencies=[manager_guard])
+def list_reevaluations(
+    instructor_id: int | None = None,
+    skill_id: int | None = None,
+    status: ReevaluationStatus | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> list[ReevaluationRequestOut]:
+    stmt = (
+        select(ReevaluationRequest)
+        .where(ReevaluationRequest.school_id == current_user.school_id)
+        .options(
+            joinedload(ReevaluationRequest.instructor),
+            joinedload(ReevaluationRequest.supervisor),
+            joinedload(ReevaluationRequest.skill),
+        )
+        .order_by(ReevaluationRequest.requested_at.desc(), ReevaluationRequest.id.desc())
+    )
+    if instructor_id is not None:
+        stmt = stmt.where(ReevaluationRequest.instructor_id == instructor_id)
+    if skill_id is not None:
+        stmt = stmt.where(ReevaluationRequest.skill_id == skill_id)
+    if status is not None:
+        stmt = stmt.where(ReevaluationRequest.status == status)
+    requests = db.scalars(stmt).all()
+    return [reevaluation_request_row(item) for item in requests]
+
+
+@router.put("/reevaluations/{request_id}/complete", response_model=ReevaluationRequestOut, dependencies=[manager_guard])
+def complete_reevaluation(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> ReevaluationRequestOut:
+    request = db.scalar(
+        select(ReevaluationRequest)
+        .where(
+            ReevaluationRequest.id == request_id,
+            ReevaluationRequest.school_id == current_user.school_id,
+            ReevaluationRequest.status == ReevaluationStatus.OPEN,
+        )
+        .options(
+            joinedload(ReevaluationRequest.instructor),
+            joinedload(ReevaluationRequest.supervisor),
+            joinedload(ReevaluationRequest.skill),
+        )
+    )
+    if not request:
+        raise HTTPException(status_code=404, detail="Reevaluation request not found")
+
+    request.status = ReevaluationStatus.COMPLETED
+    request.completed_at = datetime.now(timezone.utc)
+
+    latest_evaluation = db.scalar(
+        select(Evaluation)
+        .where(
+            Evaluation.school_id == current_user.school_id,
+            Evaluation.instructor_id == request.instructor_id,
+            Evaluation.skill_id == request.skill_id,
+        )
+        .order_by(Evaluation.created_at.desc(), Evaluation.id.desc())
+    )
+    if latest_evaluation:
+        latest_evaluation.needs_reevaluation = False
+
+    db.commit()
+    db.refresh(request)
+    return reevaluation_request_row(request)
+
+
 @router.get("/exports/evaluations.csv", dependencies=[manager_guard])
 def export_evaluations_csv(
     instructor_id: int | None = None,
     supervisor_id: int | None = None,
     skill_id: int | None = None,
     final_grade: int | None = Query(default=None, ge=1, le=5),
+    needs_reevaluation: bool | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
     sort_by: str = Query(default="created_at"),
@@ -633,6 +786,7 @@ def export_evaluations_csv(
         supervisor_id=supervisor_id,
         skill_id=skill_id,
         final_grade=final_grade,
+        needs_reevaluation=needs_reevaluation,
         date_from=date_from,
         date_to=date_to,
     )
@@ -662,6 +816,7 @@ def email_evaluations_csv(
             supervisor_id=filters.supervisor_id,
             skill_id=filters.skill_id,
             final_grade=filters.final_grade,
+            needs_reevaluation=filters.needs_reevaluation,
             date_from=filters.date_from,
             date_to=filters.date_to,
         )

@@ -1,18 +1,44 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from db import get_db
 from deps import require_roles
-from models import Attribute, Evaluation, Level, Skill, SkillAttribute, User, UserRole
-from schemas import AttributeOut, EvaluationCreate, EvaluationDetailOut, EvaluationSummaryOut, EvaluationUpdate, LevelOut, SkillOut, UserOut
+from models import (
+    Attribute,
+    Evaluation,
+    Level,
+    ReevaluationRequest,
+    ReevaluationStatus,
+    Skill,
+    SkillAttribute,
+    User,
+    UserRole,
+)
+from schemas import (
+    AttributeOut,
+    EvaluationCreate,
+    EvaluationDetailOut,
+    EvaluationSummaryOut,
+    EvaluationUpdate,
+    LevelOut,
+    ReevaluationRequestOut,
+    SkillOut,
+    UserOut,
+)
 from services import (
+    clear_reevaluation_for_skill,
     ensure_skill_in_school,
     ensure_user_role,
     evaluation_detail_row,
     evaluation_query_with_joins,
     evaluation_summary_row,
+    recalculate_final_grade,
+    reevaluation_request_row,
     sync_ratings,
+    sync_reevaluation_state,
 )
 
 
@@ -25,7 +51,11 @@ def list_levels(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
 ) -> list[LevelOut]:
-    levels = db.scalars(select(Level).where(Level.school_id == current_user.school_id).order_by(Level.sort_order)).all()
+    levels = db.scalars(
+        select(Level)
+        .where(Level.school_id == current_user.school_id, Level.is_active.is_(True))
+        .order_by(Level.sort_order)
+    ).all()
     return list(levels)
 
 
@@ -37,7 +67,11 @@ def list_skills(
     stmt = (
         select(Skill)
         .join(Level, Skill.level_id == Level.id)
-        .where(Level.school_id == current_user.school_id)
+        .where(
+            Level.school_id == current_user.school_id,
+            Level.is_active.is_(True),
+            Skill.is_active.is_(True),
+        )
         .order_by(Skill.sort_order)
     )
     skills = db.scalars(stmt).all()
@@ -68,14 +102,19 @@ def list_skill_attributes(
     skill = db.scalar(
         select(Skill)
         .join(Level, Skill.level_id == Level.id)
-        .where(Skill.id == skill_id, Level.school_id == current_user.school_id)
+        .where(
+            Skill.id == skill_id,
+            Skill.is_active.is_(True),
+            Level.school_id == current_user.school_id,
+            Level.is_active.is_(True),
+        )
     )
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     return db.scalars(
         select(Attribute)
         .join(SkillAttribute, Attribute.id == SkillAttribute.attribute_id)
-        .where(SkillAttribute.skill_id == skill_id)
+        .where(SkillAttribute.skill_id == skill_id, Attribute.is_active.is_(True))
         .order_by(Attribute.sort_order.asc(), Attribute.name.asc())
     ).all()
 
@@ -99,10 +138,19 @@ def get_my_evaluation(
 
 @router.get("/evaluations", response_model=list[EvaluationSummaryOut], dependencies=[supervisor_guard])
 def list_my_evaluations(
+    instructor_id: int | None = None,
+    skill_id: int | None = None,
+    needs_reevaluation: bool | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
 ) -> list[EvaluationSummaryOut]:
     stmt = evaluation_query_with_joins(current_user.school_id).where(Evaluation.supervisor_id == current_user.id)
+    if instructor_id is not None:
+        stmt = stmt.where(Evaluation.instructor_id == instructor_id)
+    if skill_id is not None:
+        stmt = stmt.where(Evaluation.skill_id == skill_id)
+    if needs_reevaluation is not None:
+        stmt = stmt.where(Evaluation.needs_reevaluation.is_(needs_reevaluation))
     evaluations = db.scalars(stmt).all()
     return [evaluation_summary_row(item) for item in evaluations]
 
@@ -122,10 +170,14 @@ def create_evaluation(
         supervisor_id=current_user.id,
         skill_id=payload.skill_id,
         notes=payload.notes,
+        needs_reevaluation=payload.needs_reevaluation,
     )
     db.add(evaluation)
     db.flush()
     sync_ratings(db, evaluation, [(r.attribute_id, r.rating, r.comment) for r in payload.ratings])
+    db.flush()
+    recalculate_final_grade(db, evaluation)
+    sync_reevaluation_state(db, evaluation, force=payload.needs_reevaluation, notes=payload.notes)
     db.commit()
 
     created = db.scalar(evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation.id))
@@ -154,9 +206,76 @@ def update_evaluation(
     evaluation.notes = payload.notes
     if payload.ratings is not None:
         sync_ratings(db, evaluation, [(r.attribute_id, r.rating, r.comment) for r in payload.ratings])
+    db.flush()
+    recalculate_final_grade(db, evaluation)
+    sync_reevaluation_state(
+        db,
+        evaluation,
+        force=bool(payload.needs_reevaluation),
+        notes=payload.notes,
+    )
     db.commit()
 
     full = db.scalar(evaluation_query_with_joins(current_user.school_id).where(Evaluation.id == evaluation.id))
     if not full:
         raise HTTPException(status_code=500, detail="Failed to reload evaluation")
     return evaluation_detail_row(full)
+
+
+@router.get("/reevaluations", response_model=list[ReevaluationRequestOut], dependencies=[supervisor_guard])
+def list_reevaluations(
+    instructor_id: int | None = None,
+    skill_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
+) -> list[ReevaluationRequestOut]:
+    stmt = (
+        select(ReevaluationRequest)
+        .where(
+            ReevaluationRequest.school_id == current_user.school_id,
+            ReevaluationRequest.status == ReevaluationStatus.OPEN,
+        )
+        .options(
+            joinedload(ReevaluationRequest.instructor),
+            joinedload(ReevaluationRequest.supervisor),
+            joinedload(ReevaluationRequest.skill),
+        )
+        .order_by(ReevaluationRequest.requested_at.desc(), ReevaluationRequest.id.desc())
+    )
+    if instructor_id is not None:
+        stmt = stmt.where(ReevaluationRequest.instructor_id == instructor_id)
+    if skill_id is not None:
+        stmt = stmt.where(ReevaluationRequest.skill_id == skill_id)
+    requests = db.scalars(stmt).all()
+    return [reevaluation_request_row(item) for item in requests]
+
+
+@router.put("/reevaluations/{request_id}/complete", response_model=ReevaluationRequestOut, dependencies=[supervisor_guard])
+def complete_reevaluation(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
+) -> ReevaluationRequestOut:
+    request = db.scalar(
+        select(ReevaluationRequest)
+        .where(
+            ReevaluationRequest.id == request_id,
+            ReevaluationRequest.school_id == current_user.school_id,
+            ReevaluationRequest.status == ReevaluationStatus.OPEN,
+        )
+        .options(
+            joinedload(ReevaluationRequest.instructor),
+            joinedload(ReevaluationRequest.supervisor),
+            joinedload(ReevaluationRequest.skill),
+        )
+    )
+    if not request:
+        raise HTTPException(status_code=404, detail="Reevaluation request not found")
+
+    request.status = ReevaluationStatus.COMPLETED
+    request.completed_at = datetime.now(timezone.utc)
+    clear_reevaluation_for_skill(db, request.instructor_id, request.skill_id)
+
+    db.commit()
+    db.refresh(request)
+    return reevaluation_request_row(request)

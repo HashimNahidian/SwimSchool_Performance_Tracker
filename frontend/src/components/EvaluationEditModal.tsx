@@ -24,10 +24,19 @@ export function EvaluationEditModal({
   onSaved: (updated: EvaluationDetail) => void;
   onSubmitted: (updated: EvaluationDetail) => void;
   onClose: () => void;
-  updateFn?: (token: string, id: number, payload: { notes?: string | null; ratings?: Array<{ attribute_id: number; rating: number; comment?: string | null }> }) => Promise<EvaluationDetail>;
+  updateFn?: (
+    token: string,
+    id: number,
+    payload: {
+      notes?: string | null;
+      ratings?: Array<{ attribute_id: number; rating: number; comment?: string | null }>;
+      needs_reevaluation?: boolean;
+    }
+  ) => Promise<EvaluationDetail>;
   showSubmit?: boolean;
 }) {
   const [notes, setNotes] = useState(evaluation.notes ?? "");
+  const [needsReevaluation, setNeedsReevaluation] = useState(evaluation.needs_reevaluation);
   const [ratings, setRatings] = useState<Record<number, number>>(
     Object.fromEntries(evaluation.ratings.map((r) => [r.attribute_id, r.rating]))
   );
@@ -45,6 +54,7 @@ export function EvaluationEditModal({
           attribute_id: Number(id),
           rating: value,
         })),
+        needs_reevaluation: needsReevaluation,
       });
       onSaved(updated);
     } catch (err) {
@@ -119,6 +129,16 @@ export function EvaluationEditModal({
                 rows={4}
                 placeholder="Optional coaching notes..."
               />
+            </label>
+
+            <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={needsReevaluation}
+                onChange={(e) => setNeedsReevaluation(e.target.checked)}
+                style={{ width: "auto" }}
+              />
+              Mark as needing reevaluation
             </label>
 
             {error && <p className="error">{error}</p>}

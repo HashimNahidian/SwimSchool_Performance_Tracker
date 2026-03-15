@@ -58,6 +58,7 @@ class Level(Base):
     school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     school: Mapped["School"] = relationship()
@@ -71,6 +72,7 @@ class Skill(Base):
     level_id: Mapped[int] = mapped_column(ForeignKey("levels.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     level: Mapped["Level"] = relationship()
@@ -88,6 +90,7 @@ class Attribute(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     school: Mapped["School"] = relationship()
@@ -116,6 +119,7 @@ class Evaluation(Base):
     skill_id: Mapped[int] = mapped_column(ForeignKey("skills.id"), nullable=False, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     final_grade: Mapped[int | None] = mapped_column(SmallInteger)
+    needs_reevaluation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -125,6 +129,11 @@ class Evaluation(Base):
     skill: Mapped["Skill"] = relationship()
     ratings: Mapped[list["EvaluationRating"]] = relationship(
         back_populates="evaluation", cascade="all, delete-orphan"
+    )
+    reevaluation_requests: Mapped[list["ReevaluationRequest"]] = relationship(
+        back_populates="source_evaluation",
+        cascade="all, delete-orphan",
+        foreign_keys="ReevaluationRequest.source_evaluation_id",
     )
 
 
@@ -145,6 +154,41 @@ class EvaluationRating(Base):
 
     evaluation: Mapped["Evaluation"] = relationship(back_populates="ratings")
     attribute: Mapped["Attribute"] = relationship()
+
+
+class ReevaluationStatus(str, enum.Enum):
+    OPEN = "OPEN"
+    COMPLETED = "COMPLETED"
+    CANCELED = "CANCELED"
+
+
+class ReevaluationRequest(Base):
+    __tablename__ = "reevaluation_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
+    instructor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    supervisor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True)
+    skill_id: Mapped[int] = mapped_column(ForeignKey("skills.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_evaluation_id: Mapped[int | None] = mapped_column(ForeignKey("evaluations.id", ondelete="SET NULL"), nullable=True, index=True)
+    status: Mapped[ReevaluationStatus] = mapped_column(
+        Enum(ReevaluationStatus, name="reevaluation_status"),
+        nullable=False,
+        default=ReevaluationStatus.OPEN,
+        server_default="OPEN",
+    )
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    school: Mapped["School"] = relationship()
+    instructor: Mapped["User"] = relationship(foreign_keys=[instructor_id])
+    supervisor: Mapped["User"] = relationship(foreign_keys=[supervisor_id])
+    skill: Mapped["Skill"] = relationship()
+    source_evaluation: Mapped["Evaluation | None"] = relationship(
+        foreign_keys=[source_evaluation_id],
+        back_populates="reevaluation_requests",
+    )
 
 
 class RefreshToken(Base):
