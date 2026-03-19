@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { LoginPage } from "./pages/LoginPage";
 import { ManagerPage } from "./pages/ManagerPage";
 import { SupervisorPage } from "./pages/SupervisorPage";
+import { SupervisorEvaluationsPage } from "./pages/SupervisorEvaluationsPage";
 import { InstructorPage } from "./pages/InstructorPage";
 
 export default function App() {
@@ -26,7 +27,23 @@ export default function App() {
               path="/supervisor"
               element={
                 <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
+                  <Navigate to="/supervisor/evaluations" replace />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/supervisor/manage"
+              element={
+                <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
                   <SupervisorPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/supervisor/evaluations"
+              element={
+                <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
+                  <SupervisorEvaluationsPage />
                 </ProtectedRoute>
               }
             />

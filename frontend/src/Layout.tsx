@@ -5,7 +5,7 @@ import type { UserRole } from "./types";
 
 const ROLE_PATH: Record<UserRole, string> = {
   MANAGER: "/manager",
-  SUPERVISOR: "/supervisor",
+  SUPERVISOR: "/supervisor/manage",
   INSTRUCTOR: "/instructor",
 };
 
@@ -33,13 +33,30 @@ export function Layout() {
         </div>
 
         <nav className="topbar-nav">
-          {user?.role && (
-            <NavLink
-              to={ROLE_PATH[user.role]}
-              className={({ isActive }) => `topnav-link${isActive ? " active" : ""}`}
-            >
-              Dashboard
-            </NavLink>
+          {user?.role === "SUPERVISOR" ? (
+            <>
+              <NavLink
+                to="/supervisor/evaluations"
+                className={({ isActive }) => `topnav-link${isActive ? " active" : ""}`}
+              >
+                View Evaluations
+              </NavLink>
+              <NavLink
+                to="/supervisor/manage"
+                className={({ isActive }) => `topnav-link${isActive ? " active" : ""}`}
+              >
+                Create Eval
+              </NavLink>
+            </>
+          ) : (
+            user?.role && (
+              <NavLink
+                to={ROLE_PATH[user.role]}
+                className={({ isActive }) => `topnav-link${isActive ? " active" : ""}`}
+              >
+                Dashboard
+              </NavLink>
+            )
           )}
         </nav>
 

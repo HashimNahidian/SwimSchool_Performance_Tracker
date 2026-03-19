@@ -34,6 +34,8 @@ import { EvaluationTable } from "../components/EvaluationTable";
 import { BarChart } from "../components/BarChart";
 import { EvaluationReportModal } from "../components/EvaluationReport";
 import { EvaluationEditModal } from "../components/EvaluationEditModal";
+import { EvaluationFiltersCard, type EvaluationFilterValues } from "../components/EvaluationFiltersCard";
+import { EvaluationMonthlyStats } from "../components/EvaluationMonthlyStats";
 
 type ManagerTab = "dashboard" | "users" | "levels" | "evaluations";
 
@@ -50,7 +52,19 @@ function parsePositiveInt(value: string): number | undefined {
   return Number.isNaN(n) ? undefined : n;
 }
 
-function buildQuery(filters: Record<string, string>): ManagerEvaluationQuery {
+function parseSortOption(sortOption: string): {
+  sortBy: NonNullable<ManagerEvaluationQuery["sort_by"]>;
+  sortDir: NonNullable<ManagerEvaluationQuery["sort_dir"]>;
+} {
+  const [sortByRaw, sortDirRaw] = sortOption.split(":");
+  const sortBy = SORT_FIELDS.has(sortByRaw as NonNullable<ManagerEvaluationQuery["sort_by"]>)
+    ? (sortByRaw as NonNullable<ManagerEvaluationQuery["sort_by"]>)
+    : "created_at";
+  const sortDir = sortDirRaw === "asc" ? "asc" : "desc";
+  return { sortBy, sortDir };
+}
+
+function buildQuery(filters: EvaluationFilterValues): ManagerEvaluationQuery {
   const q: ManagerEvaluationQuery = {};
   const instructorId = parsePositiveInt(filters.instructor_id);
   const supervisorId = parsePositiveInt(filters.supervisor_id);
@@ -63,10 +77,9 @@ function buildQuery(filters: Record<string, string>): ManagerEvaluationQuery {
   if (filters.needs_reevaluation) q.needs_reevaluation = filters.needs_reevaluation === "true";
   if (filters.date_from) q.date_from = filters.date_from;
   if (filters.date_to) q.date_to = filters.date_to;
-  q.sort_by = SORT_FIELDS.has(filters.sort_by as NonNullable<ManagerEvaluationQuery["sort_by"]>)
-    ? (filters.sort_by as NonNullable<ManagerEvaluationQuery["sort_by"]>)
-    : "created_at";
-  q.sort_dir = filters.sort_dir === "asc" ? "asc" : "desc";
+  const { sortBy, sortDir } = parseSortOption(filters.sort_option);
+  q.sort_by = sortBy;
+  q.sort_dir = sortDir;
   return q;
 }
 
@@ -83,15 +96,20 @@ export function ManagerPage() {
   const [editEval, setEditEval] = useState<EvaluationDetail | null>(null);
   const [pendingDeleteEval, setPendingDeleteEval] = useState<EvaluationSummary | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState<EvaluationFilterValues>({
     instructor_id: "", supervisor_id: "", skill_id: "",
     final_grade: "", needs_reevaluation: "", date_from: "", date_to: "",
-    sort_by: "created_at", sort_dir: "desc"
+    sort_option: "created_at:desc", selected_days: []
   });
   const [appliedQuery, setAppliedQuery] = useState<ManagerEvaluationQuery>({
     sort_by: "created_at", sort_dir: "desc", limit: EVALUATIONS_PAGE_SIZE, offset: 0
   });
   const [evaluationsPage, setEvaluationsPage] = useState(0);
+  const [appliedSelectedDays, setAppliedSelectedDays] = useState<number[]>([]);
+  const visibleEvaluations = useMemo(() => {
+    if (appliedSelectedDays.length === 0) return evaluations;
+    return evaluations.filter((row) => appliedSelectedDays.includes(new Date(row.created_at).getDay()));
+  }, [appliedSelectedDays, evaluations]);
 
   useEffect(() => {
     if (!token) return;
@@ -234,104 +252,71 @@ export function ManagerPage() {
         />
       )}
       {tab === "evaluations" && (
-        <Section title={`All Evaluations${loadingReport ? " — Loading report…" : ""}`}>
-          <form className="form inline" onSubmit={(e) => { e.preventDefault(); setEvaluationsPage(0); setAppliedQuery({ ...buildQuery(filters), limit: EVALUATIONS_PAGE_SIZE, offset: 0 }); }}>
-            <select value={filters.instructor_id}
-              onChange={(e) => setFilters((p) => ({ ...p, instructor_id: e.target.value }))}>
-              <option value="">all instructors</option>
-              {users.filter((u) => u.role === "INSTRUCTOR").map((u) => (
-                <option key={u.id} value={u.id}>{u.full_name}</option>
-              ))}
-            </select>
-            <select value={filters.supervisor_id}
-              onChange={(e) => setFilters((p) => ({ ...p, supervisor_id: e.target.value }))}>
-              <option value="">all supervisors</option>
-              {users.filter((u) => u.role === "SUPERVISOR").map((u) => (
-                <option key={u.id} value={u.id}>{u.full_name}</option>
-              ))}
-            </select>
-            <select value={filters.skill_id}
-              onChange={(e) => setFilters((p) => ({ ...p, skill_id: e.target.value }))}>
-              <option value="">all skills</option>
-              {skills.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <select value={filters.final_grade}
-              onChange={(e) => setFilters((p) => ({ ...p, final_grade: e.target.value }))}>
-              <option value="">all grades</option>
-              <option value="1">1 — Does not meet Standards</option>
-              <option value="2">2 — Needs Improvement</option>
-              <option value="3">3 — Meets Standard</option>
-              <option value="4">4 — Exceeds Standard</option>
-              <option value="5">5 — Outstanding</option>
-            </select>
-            <select value={filters.needs_reevaluation}
-              onChange={(e) => setFilters((p) => ({ ...p, needs_reevaluation: e.target.value }))}>
-              <option value="">all reevaluation states</option>
-              <option value="true">needs reevaluation</option>
-              <option value="false">does not need reevaluation</option>
-            </select>
-            <select value={filters.sort_by}
-              onChange={(e) => setFilters((p) => ({ ...p, sort_by: e.target.value }))}>
-              <option value="created_at">date created</option>
-              <option value="updated_at">date updated</option>
-              <option value="final_grade">final grade</option>
-              <option value="id">id</option>
-              <option value="instructor_id">instructor</option>
-              <option value="supervisor_id">supervisor</option>
-            </select>
-            <select value={filters.sort_dir}
-              onChange={(e) => setFilters((p) => ({ ...p, sort_dir: e.target.value }))}>
-              <option value="desc">newest first</option>
-              <option value="asc">oldest first</option>
-            </select>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                border: "1.5px solid #bbd6ea",
-                borderRadius: 8,
-                padding: "0 8px",
-                background: "white",
-                minHeight: 40,
-                gridColumn: "span 2",
-              }}
-            >
-              <input
-                type={filters.date_from ? "date" : "text"}
-                placeholder="Start Date"
-                value={filters.date_from}
-                onChange={(e) => setFilters((p) => ({ ...p, date_from: e.target.value }))}
-                onFocus={(e) => { e.currentTarget.type = "date"; }}
-                onBlur={(e) => {
-                  if (!e.currentTarget.value) e.currentTarget.type = "text";
+        <>
+          <div className="page-heading">
+            <h1 className="page-title">Evaluation History</h1>
+            <p className="page-subtitle">Review, filter, export, and manage evaluations across the whole program.</p>
+          </div>
+
+          <EvaluationMonthlyStats rows={visibleEvaluations} flaggedLabel="Evaluations needing reevaluation" />
+
+          <div className="evaluation-layout">
+            <aside className="evaluation-sidebar">
+              <EvaluationFiltersCard
+                title="Filter Evaluations"
+                filters={filters}
+                setFilters={setFilters}
+                skills={skills}
+                instructors={users.filter((u) => u.role === "INSTRUCTOR")}
+                supervisors={users.filter((u) => u.role === "SUPERVISOR")}
+                showSupervisorFilter
+                onApply={() => {
+                  setEvaluationsPage(0);
+                  setAppliedSelectedDays(filters.selected_days);
+                  setAppliedQuery({ ...buildQuery(filters), limit: EVALUATIONS_PAGE_SIZE, offset: 0 });
                 }}
-                style={{ border: "none", boxShadow: "none", padding: "8px 4px", minWidth: 130 }}
-              />
-              <input
-                type={filters.date_to ? "date" : "text"}
-                placeholder="End Date"
-                value={filters.date_to}
-                onChange={(e) => setFilters((p) => ({ ...p, date_to: e.target.value }))}
-                onFocus={(e) => { e.currentTarget.type = "date"; }}
-                onBlur={(e) => {
-                  if (!e.currentTarget.value) e.currentTarget.type = "text";
+                onClear={() => {
+                  const nextFilters: EvaluationFilterValues = {
+                    instructor_id: "",
+                    supervisor_id: "",
+                    skill_id: "",
+                    final_grade: "",
+                    needs_reevaluation: "",
+                    date_from: "",
+                    date_to: "",
+                    sort_option: "created_at:desc",
+                    selected_days: [],
+                  };
+                  setFilters(nextFilters);
+                  setEvaluationsPage(0);
+                  setAppliedSelectedDays([]);
+                  setAppliedQuery({ sort_by: "created_at", sort_dir: "desc", limit: EVALUATIONS_PAGE_SIZE, offset: 0 });
                 }}
-                style={{ border: "none", boxShadow: "none", padding: "8px 4px", minWidth: 130 }}
+                actions={(
+                  <a
+                    href={exportEvaluationsCsvUrl()}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="button-link"
+                    onClick={(e) => { if (!token) return; e.preventDefault(); downloadCsv(); }}
+                  >
+                    Export CSV
+                  </a>
+                )}
               />
-            </div>
-            <button type="submit">Apply Filters</button>
-          </form>
-          <a href={exportEvaluationsCsvUrl()} target="_blank" rel="noreferrer" className="button-link"
-            onClick={(e) => { if (!token) return; e.preventDefault(); downloadCsv(); }}>
-            Export CSV
-          </a>
+            </aside>
+
+            <div className="evaluation-main">
+              <Section title={`All Evaluations${loadingReport ? " — Loading report…" : ""}`}>
           <EvaluationTable
-            rows={evaluations}
+            rows={visibleEvaluations}
             onView={handleViewReport}
             onEdit={handleEditEval}
             onDelete={handleDeleteEval}
           />
+          {visibleEvaluations.length === 0 && (
+            <p style={{ color: "#64748b", fontSize: 14, paddingTop: 8 }}>No evaluations match the current filters.</p>
+          )}
           <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 12 }}>
             <button
               type="button"
@@ -359,7 +344,10 @@ export function ManagerPage() {
               Next
             </button>
           </div>
-        </Section>
+              </Section>
+            </div>
+          </div>
+        </>
       )}
 
       {reportEval && (
