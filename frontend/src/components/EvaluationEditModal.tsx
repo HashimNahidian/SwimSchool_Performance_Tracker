@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { updateSupervisorEvaluation } from "../api";
+import { EvaluationTimer } from "./EvaluationTimer";
 import type { EvaluationDetail } from "../types";
 
 const RATING_LABEL: Record<number, string> = {
@@ -29,6 +30,7 @@ export function EvaluationEditModal({
     id: number,
     payload: {
       notes?: string | null;
+      duration_seconds?: number | null;
       ratings?: Array<{ attribute_id: number; rating: number; comment?: string | null }>;
       needs_reevaluation?: boolean;
     }
@@ -36,6 +38,7 @@ export function EvaluationEditModal({
   showSubmit?: boolean;
 }) {
   const [notes, setNotes] = useState(evaluation.notes ?? "");
+  const [durationSeconds, setDurationSeconds] = useState<number | null>(evaluation.duration_seconds ?? null);
   const [needsReevaluation, setNeedsReevaluation] = useState(evaluation.needs_reevaluation);
   const [ratings, setRatings] = useState<Record<number, number>>(
     Object.fromEntries(evaluation.ratings.map((r) => [r.attribute_id, r.rating]))
@@ -50,6 +53,7 @@ export function EvaluationEditModal({
     try {
       const updated = await updateFn(token, evaluation.id, {
         notes: notes.trim() || null,
+        duration_seconds: durationSeconds,
         ratings: Object.entries(ratings).map(([id, value]) => ({
           attribute_id: Number(id),
           rating: value,
@@ -130,6 +134,14 @@ export function EvaluationEditModal({
                 placeholder="Optional coaching notes..."
               />
             </label>
+
+            <div>
+              <div style={{ fontWeight: 700, color: "#023e8a", marginBottom: 8 }}>Skill time tracking</div>
+              <EvaluationTimer
+                initialSeconds={evaluation.duration_seconds ?? 0}
+                onChange={(seconds) => setDurationSeconds(seconds)}
+              />
+            </div>
 
             <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 600 }}>
               <input

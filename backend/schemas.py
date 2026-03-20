@@ -1,8 +1,8 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
-from models import ReevaluationStatus, UserRole
+from models import ReevaluationStatus, ScheduledEvaluationStatus, UserRole
 
 
 class TokenResponse(BaseModel):
@@ -12,8 +12,15 @@ class TokenResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: str = Field(min_length=3, max_length=255)
+    username: str | None = Field(default=None, min_length=1, max_length=255)
+    email: str | None = Field(default=None, min_length=3, max_length=255)
     password: str = Field(min_length=8)
+
+    @model_validator(mode="after")
+    def ensure_identifier(self) -> "LoginRequest":
+        if not (self.username or self.email):
+            raise ValueError("username is required")
+        return self
 
 
 class RefreshRequest(BaseModel):
@@ -22,7 +29,8 @@ class RefreshRequest(BaseModel):
 
 class UserCreate(BaseModel):
     full_name: str = Field(min_length=1, max_length=255)
-    email: str = Field(min_length=3, max_length=255)
+    username: str = Field(min_length=1, max_length=50)
+    email: str | None = Field(default=None, min_length=3, max_length=255)
     phone: str | None = Field(default=None, max_length=25)
     password: str = Field(min_length=8)
     role: UserRole
@@ -31,6 +39,7 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=1, max_length=255)
+    username: str | None = Field(default=None, min_length=1, max_length=50)
     email: str | None = Field(default=None, min_length=3, max_length=255)
     phone: str | None = Field(default=None, max_length=25)
     role: UserRole | None = None
@@ -44,7 +53,8 @@ class UserOut(BaseModel):
     id: int
     school_id: int
     full_name: str
-    email: str
+    username: str
+    email: str | None
     phone: str | None
     role: UserRole
     is_active: bool
@@ -141,13 +151,18 @@ class RatingIn(BaseModel):
 class EvaluationCreate(BaseModel):
     instructor_id: int
     skill_id: int
+    source_evaluation_id: int | None = None
+    scheduled_evaluation_id: int | None = None
     notes: str | None = None
+    duration_seconds: int | None = None
     ratings: list[RatingIn] = Field(default_factory=list)
     needs_reevaluation: bool = False
 
 
 class EvaluationUpdate(BaseModel):
     notes: str | None = None
+    scheduled_evaluation_id: int | None = None
+    duration_seconds: int | None = None
     ratings: list[RatingIn] | None = None
     needs_reevaluation: bool | None = None
 
@@ -162,8 +177,11 @@ class EvaluationSummaryOut(BaseModel):
     level_name: str
     skill_id: int
     skill_name: str
+    scheduled_evaluation_id: int | None = None
+    duration_seconds: int | None
     final_grade: int | None
     needs_reevaluation: bool
+    instructor_acknowledged_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -218,3 +236,46 @@ class ExportEmailRequest(BaseModel):
     subject: str | None = Field(default=None, max_length=200)
     message: str | None = Field(default=None, max_length=4000)
     filters: EvaluationFilterIn | None = None
+
+
+class ScheduledEvaluationBase(BaseModel):
+    instructor_id: int
+    skill_id: int
+    target_date: date
+    assigned_to_id: int | None = None
+    status: ScheduledEvaluationStatus = ScheduledEvaluationStatus.PENDING
+    notes: str | None = None
+
+
+class ScheduledEvaluationCreate(ScheduledEvaluationBase):
+    pass
+
+
+class ScheduledEvaluationUpdate(BaseModel):
+    instructor_id: int | None = None
+    skill_id: int | None = None
+    target_date: date | None = None
+    assigned_to_id: int | None = None
+    status: ScheduledEvaluationStatus | None = None
+    notes: str | None = None
+
+
+class ScheduledEvaluationOut(BaseModel):
+    id: int
+    school_id: int
+    instructor_id: int
+    instructor_name: str
+    skill_id: int
+    skill_name: str
+    level_id: int
+    level_name: str
+    target_date: date
+    requested_by_id: int
+    requested_by_name: str
+    assigned_to_id: int | None
+    assigned_to_name: str | None
+    status: ScheduledEvaluationStatus
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None

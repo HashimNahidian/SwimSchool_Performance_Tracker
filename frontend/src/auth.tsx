@@ -6,7 +6,7 @@ interface AuthContextValue {
   user: User | null;
   token: string | null;
   ready: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -85,8 +85,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       token,
       ready,
-      login: async (email: string, password: string) => {
-        const data = await apiLogin(email, password);
+      login: async (username: string, password: string) => {
+        const data = await apiLogin(username, password);
         const userData = await apiMe(data.access_token);
         setToken(data.access_token);
         setUser(userData);

@@ -9,15 +9,18 @@ import {
   listSupervisorInstructors,
   listSupervisorLevels,
   listSupervisorReevaluations,
+  listSupervisorScheduledEvaluations,
   listSupervisorSkillAttributes,
   listSupervisorSkills,
 } from "../../api";
+import { EvaluationTimer } from "../../components/EvaluationTimer";
 import type {
   Attribute,
   EvaluationDetail,
   EvaluationSummary,
   Level,
   ReevaluationRequest,
+  ScheduledEvaluation,
   Skill,
   User,
 } from "../../types";
@@ -26,7 +29,12 @@ import { currentMonthStats } from "../../components/EvaluationMonthlyStats";
 export type ReevaluationPrefill = {
   evaluationId: number;
   instructorId: number;
+  levelId: number;
   skillId: number;
+  sourceEvalId?: number;
+  scheduledEvaluationId?: number;
+  mode?: "reevaluation" | "scheduled";
+  helperText?: string;
 };
 
 type SupervisorFilters = {
@@ -61,6 +69,10 @@ const RATING_LABEL: Record<number, string> = {
   5: "5 - Outstanding",
 };
 
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
+}
+
 export function useSupervisorData() {
   const { token, user } = useAuth();
   const [error, setError] = useState("");
@@ -69,6 +81,7 @@ export function useSupervisorData() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
   const [reevaluations, setReevaluations] = useState<ReevaluationRequest[]>([]);
+  const [scheduledEvaluations, setScheduledEvaluations] = useState<ScheduledEvaluation[]>([]);
   const [needsReevalMode, setNeedsReevalMode] = useState(false);
   const [reportEval, setReportEval] = useState<EvaluationDetail | null>(null);
   const [editEval, setEditEval] = useState<EvaluationDetail | null>(null);
@@ -84,13 +97,15 @@ export function useSupervisorData() {
       listSupervisorSkills(token),
       listSupervisorEvaluations(token),
       listSupervisorReevaluations(token),
+      listSupervisorScheduledEvaluations(token),
     ])
-      .then(([u, l, s, e, r]) => {
+      .then(([u, l, s, e, r, scheduled]) => {
         setUsers(u);
         setLevels(l);
         setSkills(s);
         setEvaluations(e);
         setReevaluations(r);
+        setScheduledEvaluations(scheduled);
       })
       .catch((e: Error) => setError(e.message));
   }, [token]);
@@ -100,10 +115,12 @@ export function useSupervisorData() {
     Promise.all([
       listSupervisorEvaluations(token),
       listSupervisorReevaluations(token),
+      listSupervisorScheduledEvaluations(token),
     ])
-      .then(([e, r]) => {
+      .then(([e, r, scheduled]) => {
         setEvaluations(e);
         setReevaluations(r);
+        setScheduledEvaluations(scheduled);
       })
       .catch((e: Error) => setError(e.message));
   }
@@ -215,6 +232,15 @@ export function useSupervisorData() {
     });
   }, [appliedFilters, reevaluations]);
 
+  const filteredAssignedEvaluations = useMemo(() => {
+    return evaluations.filter((row) => {
+      if (!row.needs_reevaluation) return false;
+      if (appliedFilters.instructorId && row.instructor_id !== Number(appliedFilters.instructorId)) return false;
+      if (appliedFilters.skillId && row.skill_id !== Number(appliedFilters.skillId)) return false;
+      return true;
+    });
+  }, [appliedFilters, evaluations]);
+
   return {
     token,
     user,
@@ -224,6 +250,7 @@ export function useSupervisorData() {
     levels,
     skills,
     evaluations,
+    scheduledEvaluations,
     reportEval,
     setReportEval,
     editEval,
@@ -236,6 +263,7 @@ export function useSupervisorData() {
     applyFilters,
     clearFilters,
     filteredRows,
+    filteredAssignedEvaluations,
     filteredReevaluations,
     stats,
     refreshData,
@@ -249,18 +277,18 @@ export function useSupervisorData() {
 export function SupervisorReevaluationPanel({
   users,
   skills,
-  filteredReevaluations,
+  assignedEvaluations,
   filters,
   setFilters,
-  onComplete,
+  onReevaluate,
   showControls = true,
 }: {
   users: User[];
   skills: Skill[];
-  filteredReevaluations: ReevaluationRequest[];
+  assignedEvaluations: EvaluationSummary[];
   filters: SupervisorFilters;
   setFilters: Dispatch<SetStateAction<SupervisorFilters>>;
-  onComplete: (id: number) => void;
+  onReevaluate: (evaluation: EvaluationSummary) => void;
   showControls?: boolean;
 }) {
   return (
@@ -293,27 +321,32 @@ export function SupervisorReevaluationPanel({
         </div>
       )}
 
-      {filteredReevaluations.length > 0 ? (
+      {assignedEvaluations.length > 0 ? (
         <table>
           <thead>
             <tr>
-              <th>Instructor</th>
+              <th>Level</th>
               <th>Skill</th>
-              <th>Requested</th>
-              <th>Notes</th>
+              <th>Grade</th>
+              <th>Created</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filteredReevaluations.map((request) => (
-              <tr key={request.id}>
-                <td>{request.instructor_name}</td>
-                <td>{request.skill_name}</td>
-                <td>{new Date(request.requested_at).toLocaleDateString()}</td>
-                <td>{request.notes || "—"}</td>
+            {assignedEvaluations.map((evaluation) => (
+              <tr key={evaluation.id}>
+                <td>{evaluation.level_name}</td>
                 <td>
-                  <button type="button" onClick={() => onComplete(request.id)}>
-                    Mark Complete
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span>{evaluation.skill_name}</span>
+                    <span style={{ fontSize: 12, color: "#64748b" }}>{evaluation.instructor_name}</span>
+                  </div>
+                </td>
+                <td>{evaluation.final_grade ?? "—"}</td>
+                <td>{fmtDate(evaluation.created_at)}</td>
+                <td>
+                  <button type="button" onClick={() => onReevaluate(evaluation)}>
+                    Reevaluate
                   </button>
                 </td>
               </tr>
@@ -321,7 +354,7 @@ export function SupervisorReevaluationPanel({
           </tbody>
         </table>
       ) : (
-        <p style={{ color: "#64748b", fontSize: 14 }}>No open reevaluation requests for the current filters.</p>
+        <p style={{ color: "#64748b", fontSize: 14 }}>No open reevaluation assignments.</p>
       )}
     </div>
   );
@@ -333,6 +366,8 @@ export function SupervisorCreateEvaluation({
   levels,
   skills,
   prefill,
+  assignedEvals = [],
+  onSelectAssignedEval,
   onCreated,
   onCancel,
 }: {
@@ -341,6 +376,8 @@ export function SupervisorCreateEvaluation({
   levels: Level[];
   skills: Skill[];
   prefill: ReevaluationPrefill | null;
+  assignedEvals?: ScheduledEvaluation[];
+  onSelectAssignedEval?: (evaluation: ScheduledEvaluation) => void;
   onCreated: (created: EvaluationDetail) => void;
   onCancel: () => void;
 }) {
@@ -348,15 +385,17 @@ export function SupervisorCreateEvaluation({
   const [levelId, setLevelId] = useState<number>(levels[0]?.id ?? 0);
   const [skillId, setSkillId] = useState<number>(0);
   const [notes, setNotes] = useState("");
+  const [durationSeconds, setDurationSeconds] = useState<number | null>(prefill ? 0 : null);
   const [needsReevaluation, setNeedsReevaluation] = useState(false);
   const [error, setError] = useState("");
   const [attributes, setAttributes] = useState<Attribute[]>([]);
   const [ratings, setRatings] = useState<Record<number, number>>({});
   const levelSkills = useMemo(() => skills.filter((item) => item.level_id === levelId), [skills, levelId]);
-  const isReevaluation = prefill !== null;
+  const isReevaluation = prefill?.mode === "reevaluation";
+  const isScheduledCompletion = prefill?.mode === "scheduled";
 
   useEffect(() => {
-    if (users.length > 0 && !instructorId) setInstructorId(users[0].id);
+      if (users.length > 0 && !instructorId) setInstructorId(users[0].id);
   }, [instructorId, users]);
 
   useEffect(() => {
@@ -376,12 +415,11 @@ export function SupervisorCreateEvaluation({
   useEffect(() => {
     if (!prefill) return;
     setInstructorId(prefill.instructorId);
+    setLevelId(prefill.levelId);
     setSkillId(prefill.skillId);
-    const skill = skills.find((item) => item.id === prefill.skillId);
-    if (skill) {
-      setLevelId(skill.level_id);
-    }
-  }, [prefill, skills]);
+    setDurationSeconds(0);
+    setNotes(prefill.helperText ?? "");
+  }, [prefill]);
 
   useEffect(() => {
     if (!skillId) return;
@@ -405,7 +443,10 @@ export function SupervisorCreateEvaluation({
       const created = await createSupervisorEvaluation(token, {
         instructor_id: instructorId,
         skill_id: skillId,
+        source_evaluation_id: prefill?.sourceEvalId ?? prefill?.evaluationId ?? undefined,
+        scheduled_evaluation_id: prefill?.scheduledEvaluationId,
         notes: notes.trim() || undefined,
+        duration_seconds: durationSeconds,
         ratings: Object.entries(ratings).map(([id, value]) => ({
           attribute_id: Number(id),
           rating: value,
@@ -413,6 +454,7 @@ export function SupervisorCreateEvaluation({
         needs_reevaluation: needsReevaluation,
       });
       setNotes("");
+      setDurationSeconds(null);
       setNeedsReevaluation(false);
       onCreated(created);
     } catch (err) {
@@ -426,15 +468,78 @@ export function SupervisorCreateEvaluation({
         <h2 style={{ marginBottom: 0 }}>{isReevaluation ? "Reevaluate Instructor" : "Create Evaluation"}</h2>
         <button type="button" className="btn-add" onClick={onCancel}>Cancel</button>
       </div>
+      <div
+        style={{
+          marginTop: 16,
+          marginBottom: 20,
+          border: "1px solid #dbeafe",
+          borderRadius: 16,
+          padding: 16,
+          background: "#f8fbff",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 6 }}>
+          <h3 style={{ margin: 0, color: "#023e8a" }}>Assigned Evals ({assignedEvals.length})</h3>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#c2550a", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Scheduled
+          </span>
+        </div>
+        {assignedEvals.length === 0 ? (
+          <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>No pending scheduled evaluations.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Instructor</th>
+                <th>Level</th>
+                <th>Skill</th>
+                <th>Target Date</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {assignedEvals.map((evaluation) => (
+                <tr key={evaluation.id}>
+                  <td>{evaluation.instructor_name}</td>
+                  <td>{evaluation.level_name}</td>
+                  <td>{evaluation.skill_name}</td>
+                  <td>{fmtDate(evaluation.target_date)}</td>
+                  <td>{evaluation.status}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => onSelectAssignedEval?.(evaluation)}
+                      title={`Complete scheduled evaluation for ${evaluation.instructor_name}`}
+                    >
+                      Complete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
       {isReevaluation && (
         <p style={{ marginTop: 10, color: "#64748b", fontSize: 14 }}>
-          Submit a follow-up evaluation for this flagged skill.
+          Reevaluating for {levels.find((level) => level.id === levelId)?.name ?? "selected level"} / {skills.find((skill) => skill.id === skillId)?.name ?? "selected skill"}.
+        </p>
+      )}
+      {isScheduledCompletion && !isReevaluation && (
+        <p style={{ marginTop: 10, color: "#64748b", fontSize: 14 }}>
+          {prefill?.helperText ?? "Complete this assigned evaluation by entering ratings and notes."}
         </p>
       )}
       <form className="form" onSubmit={onSubmit}>
         <label>
           Instructor
-          <select value={instructorId} onChange={(e) => setInstructorId(Number(e.target.value))}>
+          <select
+            required
+            value={instructorId}
+            onChange={(e) => setInstructorId(Number(e.target.value))}
+            disabled={isReevaluation || isScheduledCompletion}
+          >
             {users.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.full_name}
@@ -445,7 +550,11 @@ export function SupervisorCreateEvaluation({
 
         <label>
           Swim Level
-          <select value={levelId} onChange={(e) => setLevelId(Number(e.target.value))}>
+          <select
+            value={levelId}
+            onChange={(e) => setLevelId(Number(e.target.value))}
+            disabled={isReevaluation || isScheduledCompletion}
+          >
             {levels.map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name}
@@ -456,7 +565,11 @@ export function SupervisorCreateEvaluation({
 
         <label>
           Stroke / Skill
-          <select value={skillId} onChange={(e) => setSkillId(Number(e.target.value))}>
+          <select
+            value={skillId}
+            onChange={(e) => setSkillId(Number(e.target.value))}
+            disabled={isReevaluation || isScheduledCompletion}
+          >
             {levelSkills.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -496,6 +609,14 @@ export function SupervisorCreateEvaluation({
             placeholder="Optional coaching notes..."
           />
         </label>
+
+        <div>
+          <div style={{ fontWeight: 700, color: "#023e8a", marginBottom: 8 }}>Skill time tracking</div>
+          <EvaluationTimer
+            initialSeconds={durationSeconds ?? 0}
+            onChange={(seconds) => setDurationSeconds(seconds)}
+          />
+        </div>
 
         <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 600 }}>
           <input

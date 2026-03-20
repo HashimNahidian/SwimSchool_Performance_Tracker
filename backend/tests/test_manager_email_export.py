@@ -48,8 +48,8 @@ def client(db_session: Session) -> TestClient:
     main.app.dependency_overrides.clear()
 
 
-def auth_headers(client: TestClient, email: str) -> dict[str, str]:
-    response = client.post("/auth/login", json={"email": email, "password": "TestPass123!"})
+def auth_headers(client: TestClient, identifier: str) -> dict[str, str]:
+    response = client.post("/auth/login", json={"username": identifier, "password": "TestPass123!"})
     assert response.status_code == 200
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
@@ -62,10 +62,12 @@ def create_user(
     name: str,
     email: str,
     role: models.UserRole,
+    username: str | None = None,
 ) -> models.User:
     user = models.User(
         school_id=school_id,
         full_name=name,
+        username=username or email.split("@")[0].lower(),
         email=email,
         password_hash=hash_password("TestPass123!"),
         role=role,

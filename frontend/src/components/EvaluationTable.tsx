@@ -1,4 +1,5 @@
 import type { EvaluationSummary } from "../types";
+import { formatDurationSeconds } from "./EvaluationTimer";
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
@@ -28,12 +29,14 @@ export function EvaluationTable({
   onEdit,
   onDelete,
   onReevaluate,
+  showAcknowledged = false,
 }: {
   rows: EvaluationSummary[];
   onView?: (id: number) => void;
   onEdit?: (id: number) => void;
   onDelete?: (id: number) => void;
   onReevaluate?: (id: number) => void;
+  showAcknowledged?: boolean;
 }) {
   const hasActions = onView !== undefined || onEdit !== undefined || onDelete !== undefined || onReevaluate !== undefined;
 
@@ -46,7 +49,9 @@ export function EvaluationTable({
           <th>Supervisor</th>
           <th>Level</th>
           <th>Skill</th>
+          <th>Time</th>
           <th>Grade</th>
+          {showAcknowledged && <th>Acknowledged</th>}
           <th>Date</th>
           {hasActions && <th>Actions</th>}
         </tr>
@@ -62,6 +67,7 @@ export function EvaluationTable({
             <td>{row.supervisor_name}</td>
             <td>{row.level_name}</td>
             <td>{row.skill_name}</td>
+            <td>{formatDurationSeconds(row.duration_seconds)}</td>
             <td>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span>{row.final_grade != null ? `${row.final_grade} — ${GRADE_LABEL[row.final_grade] ?? ""}` : "—"}</span>
@@ -81,6 +87,13 @@ export function EvaluationTable({
                 )}
               </div>
             </td>
+            {showAcknowledged && (
+              <td>
+                {row.instructor_acknowledged_at
+                  ? `Read at ${new Date(row.instructor_acknowledged_at).toLocaleString()}`
+                  : "Unread"}
+              </td>
+            )}
             <td>{fmtDate(row.created_at)}</td>
             {hasActions && (
               <td>
@@ -101,6 +114,7 @@ export function EvaluationTable({
                   {onReevaluate && row.needs_reevaluation && (
                     <button
                       style={{ ...ACTION_BUTTON_STYLE, background: "#0f9b8e" }}
+                      title="Create new reevaluation record for this instructor/skill"
                       onClick={() => onReevaluate(row.id)}
                     >
                       Reevaluate

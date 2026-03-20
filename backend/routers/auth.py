@@ -32,6 +32,17 @@ def _as_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _normalize_username(value: str) -> str:
+    return value.strip().lower()
+
+
+def _normalize_email(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip().lower()
+    return cleaned or None
+
+
 @router.post("/bootstrap-manager", response_model=UserOut)
 def bootstrap_manager(payload: UserCreate, db: Session = Depends(get_db)) -> User:
     if settings.app_env == "production" and not settings.allow_bootstrap_manager:
@@ -49,10 +60,26 @@ def bootstrap_manager(payload: UserCreate, db: Session = Depends(get_db)) -> Use
     if payload.role != UserRole.MANAGER:
         raise HTTPException(status_code=400, detail="Bootstrap must create MANAGER role")
 
-    normalized_email = payload.email.strip().lower()
+    normalized_username = _normalize_username(payload.username)
+    normalized_email = _normalize_email(payload.email)
+    if db.scalar(
+        select(User.id).where(
+            User.school_id == school.id,
+            User.username == normalized_username,
+        )
+    ):
+        raise HTTPException(status_code=400, detail="Username already exists for this school")
+    if normalized_email and db.scalar(
+        select(User.id).where(
+            User.school_id == school.id,
+            User.email == normalized_email,
+        )
+    ):
+        raise HTTPException(status_code=400, detail="Email already exists")
     user = User(
         school_id=school.id,
         full_name=payload.full_name,
+        username=normalized_username,
         email=normalized_email,
         password_hash=hash_password(payload.password),
         role=payload.role,
@@ -66,17 +93,20 @@ def bootstrap_manager(payload: UserCreate, db: Session = Depends(get_db)) -> Use
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
-    normalized_email = payload.email.strip().lower()
+    identifier = _normalize_username(payload.username or payload.email or "")
     source_ip = request.client.host if request.client else "unknown"
-    limiter_key = f"{source_ip}:{normalized_email}"
+    limiter_key = f"{source_ip}:{identifier}"
     if not login_limiter.allow(limiter_key):
         raise HTTPException(status_code=429, detail="Too many login attempts, try again later")
 
-    user = db.scalar(select(User).where(User.email == normalized_email))
+    # Username-first identity activation: keep one-release email fallback for safe rollout.
+    user = db.scalar(select(User).where(User.username == identifier))
+    if not user:
+        user = db.scalar(select(User).where(User.email == identifier))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
+            detail="Invalid username/email or password",
         )
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User is inactive")

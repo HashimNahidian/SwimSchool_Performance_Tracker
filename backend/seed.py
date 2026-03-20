@@ -12,21 +12,24 @@ def get_or_create_user(
     db,
     *,
     full_name: str,
+    username: str,
     email: str,
     password: str,
     role: models.UserRole,
     school_id: int,
     is_active: bool = True,
 ) -> models.User:
+    normalized_username = username.strip().lower()
     normalized_email = email.strip().lower()
     user = db.scalar(
         select(models.User).where(
             models.User.school_id == school_id,
-            models.User.email == normalized_email,
+            models.User.username == normalized_username,
         )
     )
     if user:
         user.full_name = full_name
+        user.username = normalized_username
         user.role = role
         user.is_active = is_active
         user.email = normalized_email
@@ -35,6 +38,7 @@ def get_or_create_user(
     user = models.User(
         school_id=school_id,
         full_name=full_name,
+        username=normalized_username,
         email=normalized_email,
         password_hash=hash_password(password),
         role=role,
@@ -847,6 +851,7 @@ def seed() -> None:
         get_or_create_user(
             db,
             full_name="Mia Manager",
+            username="mia_manager",
             email="manager@propel.local",
             password="Propel123!",
             role=models.UserRole.MANAGER,
@@ -855,6 +860,7 @@ def seed() -> None:
         get_or_create_user(
             db,
             full_name="Sam Supervisor",
+            username="sam_supervisor",
             email="supervisor@propel.local",
             password="Propel123!",
             role=models.UserRole.SUPERVISOR,
@@ -863,6 +869,7 @@ def seed() -> None:
         get_or_create_user(
             db,
             full_name="Sarah Johnson",
+            username="sarah_johnson",
             email="instructor@propel.local",
             password="Propel123!",
             role=models.UserRole.INSTRUCTOR,
@@ -871,6 +878,7 @@ def seed() -> None:
         get_or_create_user(
             db,
             full_name="Alex Rivera",
+            username="alex_rivera",
             email="alex@propel.local",
             password="Propel123!",
             role=models.UserRole.INSTRUCTOR,
@@ -879,6 +887,7 @@ def seed() -> None:
         get_or_create_user(
             db,
             full_name="Jordan Lee",
+            username="jordan_lee",
             email="jordan@propel.local",
             password="Propel123!",
             role=models.UserRole.INSTRUCTOR,
@@ -887,6 +896,7 @@ def seed() -> None:
         get_or_create_user(
             db,
             full_name="Casey Morgan",
+            username="casey_morgan",
             email="casey@propel.local",
             password="Propel123!",
             role=models.UserRole.SUPERVISOR,
@@ -895,6 +905,7 @@ def seed() -> None:
         get_or_create_user(
             db,
             full_name="Taylor Brooks",
+            username="taylor_brooks",
             email="taylor@propel.local",
             password="Propel123!",
             role=models.UserRole.SUPERVISOR,
@@ -909,13 +920,13 @@ def seed() -> None:
 
     print("Seed complete.")
     print("Login credentials (password: Propel123!):")
-    print("  manager@propel.local    (Manager    — Mia Manager)")
-    print("  supervisor@propel.local (Supervisor — Sam Supervisor)")
-    print("  instructor@propel.local (Instructor — Sarah Johnson)")
-    print("  alex@propel.local       (Instructor — Alex Rivera)")
-    print("  jordan@propel.local     (Instructor — Jordan Lee)")
-    print("  casey@propel.local      (Supervisor — Casey Morgan)")
-    print("  taylor@propel.local     (Supervisor — Taylor Brooks)")
+    print("  mia_manager      (Manager    — Mia Manager)")
+    print("  sam_supervisor   (Supervisor — Sam Supervisor)")
+    print("  sarah_johnson    (Instructor — Sarah Johnson)")
+    print("  alex_rivera      (Instructor — Alex Rivera)")
+    print("  jordan_lee       (Instructor — Jordan Lee)")
+    print("  casey_morgan     (Supervisor — Casey Morgan)")
+    print("  taylor_brooks    (Supervisor — Taylor Brooks)")
     print(f"Curriculum: {len(CURRICULUM)} levels, "
           f"{sum(len(l['skills']) for l in CURRICULUM)} skills seeded.")
     print(f"Sample evaluations: {n} created.")

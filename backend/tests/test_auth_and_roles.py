@@ -9,6 +9,7 @@ def test_bootstrap_login_and_manager_access(client):
         "/auth/bootstrap-manager",
         json={
             "full_name": "Admin",
+            "username": "admin_manager",
             "email": "admin@example.com",
             "password": "StrongPass123!",
             "role": "MANAGER",
@@ -19,7 +20,7 @@ def test_bootstrap_login_and_manager_access(client):
 
     login = client.post(
         "/auth/login",
-        json={"email": "admin@example.com", "password": "StrongPass123!"},
+        json={"username": "admin_manager", "password": "StrongPass123!"},
     )
     assert login.status_code == 200, login.text
     token_payload = login.json()
@@ -45,6 +46,7 @@ def test_refresh_token_rotation(client):
         "/auth/bootstrap-manager",
         json={
             "full_name": "Admin",
+            "username": "rotate_manager",
             "email": "rotate@example.com",
             "password": "StrongPass123!",
             "role": "MANAGER",
@@ -53,7 +55,7 @@ def test_refresh_token_rotation(client):
     )
     login = client.post(
         "/auth/login",
-        json={"email": "rotate@example.com", "password": "StrongPass123!"},
+        json={"username": "rotate_manager", "password": "StrongPass123!"},
     )
     assert login.status_code == 200
     refresh = login.json()["refresh_token"]

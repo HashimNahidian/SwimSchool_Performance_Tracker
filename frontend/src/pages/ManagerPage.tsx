@@ -1,13 +1,15 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth";
 import type { ManagerEvaluationQuery } from "../api";
 import {
   createAttribute,
+  createManagerScheduledEvaluation,
   createLevel,
   createSkill,
   createUser,
   deleteAttribute,
   deleteManagerEvaluation,
+  deleteManagerScheduledEvaluation,
   deleteLevel,
   deleteSkill,
   deleteUser,
@@ -18,17 +20,19 @@ import {
   listManagerSkillAttributes,
   listAttributes,
   listLevels,
+  listManagerScheduledEvaluations,
   listManagerEvaluationsWithQuery,
   listSkills,
   listUsers,
   unlinkSkillAttribute,
   updateAttribute,
+  updateManagerScheduledEvaluation,
   updateLevel,
   updateManagerEvaluation,
   updateSkill,
   updateUser,
 } from "../api";
-import type { Attribute, EvaluationDetail, EvaluationSummary, Level, Skill, User, UserRole } from "../types";
+import type { Attribute, EvaluationDetail, EvaluationSummary, Level, ScheduledEvaluation, ScheduledEvaluationStatus, Skill, User, UserRole } from "../types";
 import { Section } from "../components/Section";
 import { EvaluationTable } from "../components/EvaluationTable";
 import { BarChart } from "../components/BarChart";
@@ -92,6 +96,7 @@ export function ManagerPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [attributes, setAttributes] = useState<Attribute[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationSummary[]>([]);
+  const [scheduledEvaluations, setScheduledEvaluations] = useState<ScheduledEvaluation[]>([]);
   const [reportEval, setReportEval] = useState<EvaluationDetail | null>(null);
   const [editEval, setEditEval] = useState<EvaluationDetail | null>(null);
   const [pendingDeleteEval, setPendingDeleteEval] = useState<EvaluationSummary | null>(null);
@@ -106,26 +111,52 @@ export function ManagerPage() {
   });
   const [evaluationsPage, setEvaluationsPage] = useState(0);
   const [appliedSelectedDays, setAppliedSelectedDays] = useState<number[]>([]);
+  const [scheduleForm, setScheduleForm] = useState({
+    instructorId: "",
+    supervisorId: "",
+    levelId: "",
+    skillId: "",
+    targetDate: new Date().toISOString().slice(0, 10),
+    notes: "",
+  });
+  const [editingScheduleId, setEditingScheduleId] = useState<number | null>(null);
   const visibleEvaluations = useMemo(() => {
     if (appliedSelectedDays.length === 0) return evaluations;
     return evaluations.filter((row) => appliedSelectedDays.includes(new Date(row.created_at).getDay()));
   }, [appliedSelectedDays, evaluations]);
+  const unreadEvaluationsCount = useMemo(
+    () => evaluations.filter((row) => !row.instructor_acknowledged_at).length,
+    [evaluations]
+  );
 
   useEffect(() => {
     if (!token) return;
     Promise.all([
       listUsers(token), listLevels(token), listSkills(token), listAttributes(token),
-      listManagerEvaluationsWithQuery(token, appliedQuery)
+      listManagerEvaluationsWithQuery(token, appliedQuery),
+      listManagerScheduledEvaluations(token),
     ])
-      .then(([u, l, s, a, e]) => {
+      .then(([u, l, s, a, e, scheduled]) => {
         setUsers(u);
         setLevels(l);
         setSkills(s);
         setAttributes(a);
         setEvaluations(e);
+        setScheduledEvaluations(scheduled);
       })
       .catch((e: Error) => setError(e.message));
   }, [token, appliedQuery]);
+
+  const scheduleSkills = useMemo(
+    () => skills.filter((skill) => !scheduleForm.levelId || skill.level_id === Number(scheduleForm.levelId)),
+    [scheduleForm.levelId, skills]
+  );
+
+  async function refreshScheduledEvaluations() {
+    if (!token) return;
+    const scheduled = await listManagerScheduledEvaluations(token);
+    setScheduledEvaluations(scheduled);
+  }
 
   function downloadCsv() {
     if (!token) return;
@@ -259,6 +290,12 @@ export function ManagerPage() {
           </div>
 
           <EvaluationMonthlyStats rows={visibleEvaluations} flaggedLabel="Evaluations needing reevaluation" />
+          <div className="card" style={{ marginBottom: 20 }}>
+            <h2 style={{ marginBottom: 8 }}>Read Status</h2>
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#023e8a" }}>
+              Unread evaluations: {unreadEvaluationsCount}
+            </p>
+          </div>
 
           <div className="evaluation-layout">
             <aside className="evaluation-sidebar">
@@ -307,12 +344,27 @@ export function ManagerPage() {
             </aside>
 
             <div className="evaluation-main">
+              {/* moved assigned evaluation panel from Dashboard to Evaluations page for manager */}
+              <ManagerScheduledEvaluations
+                token={token}
+                users={users}
+                levels={levels}
+                schedules={scheduledEvaluations}
+                form={scheduleForm}
+                editingScheduleId={editingScheduleId}
+                scheduleSkills={scheduleSkills}
+                onFormChange={setScheduleForm}
+                onStartEdit={setEditingScheduleId}
+                onRefresh={refreshScheduledEvaluations}
+                onSetError={setError}
+              />
               <Section title={`All Evaluations${loadingReport ? " — Loading report…" : ""}`}>
           <EvaluationTable
             rows={visibleEvaluations}
             onView={handleViewReport}
             onEdit={handleEditEval}
             onDelete={handleDeleteEval}
+            showAcknowledged
           />
           {visibleEvaluations.length === 0 && (
             <p style={{ color: "#64748b", fontSize: 14, paddingTop: 8 }}>No evaluations match the current filters.</p>
@@ -430,12 +482,14 @@ function ManagerUsers({
   onDeleted: (id: number) => void;
 }) {
   const [fullName, setFullName] = useState("");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<UserRole>("INSTRUCTOR");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editFullName, setEditFullName] = useState("");
+  const [editUsername, setEditUsername] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editRole, setEditRole] = useState<UserRole>("INSTRUCTOR");
@@ -449,7 +503,8 @@ function ManagerUsers({
       setError("");
       const user = await createUser(token, {
         full_name: fullName,
-        email,
+        username,
+        email: email.trim() || null,
         phone: phone.trim() || null,
         password,
         role,
@@ -457,6 +512,7 @@ function ManagerUsers({
       });
       onCreated(user);
       setFullName("");
+      setUsername("");
       setEmail("");
       setPhone("");
       setPassword("");
@@ -468,7 +524,8 @@ function ManagerUsers({
   function beginEdit(user: User) {
     setEditingId(user.id);
     setEditFullName(user.full_name);
-    setEditEmail(user.email);
+    setEditUsername(user.username);
+    setEditEmail(user.email ?? "");
     setEditPhone(user.phone ?? "");
     setEditRole(user.role);
     setEditIsActive(user.is_active);
@@ -486,14 +543,16 @@ function ManagerUsers({
       setError("");
       const payload: {
         full_name: string;
-        email: string;
+        username: string;
+        email: string | null;
         phone: string | null;
         role: UserRole;
         is_active: boolean;
         password?: string;
       } = {
         full_name: editFullName,
-        email: editEmail,
+        username: editUsername,
+        email: editEmail.trim() || null,
         phone: editPhone.trim() || null,
         role: editRole,
         is_active: editIsActive,
@@ -528,7 +587,8 @@ function ManagerUsers({
     <Section title="Users">
       <form className="form inline" onSubmit={onSubmit}>
         <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Full name" required />
-        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" type="email" required />
+        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" required />
+        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" type="email" />
         <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone (optional)" />
         <input value={password} onChange={(e) => setPassword(e.target.value)}
           placeholder="Password (8+ chars)" minLength={8} type="password" required />
@@ -546,13 +606,14 @@ function ManagerUsers({
           <div key={label} style={{ marginBottom: 20 }}>
             <p className="chart-section-title">{label} ({list.length})</p>
             <table>
-              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Active</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Name</th><th>Username</th><th>Email</th><th>Phone</th><th>Role</th><th>Active</th><th>Actions</th></tr></thead>
               <tbody>
                 {list.map((u) => (
                   <tr key={u.id}>
                     {editingId === u.id ? (
                       <>
                         <td><input value={editFullName} onChange={(e) => setEditFullName(e.target.value)} /></td>
+                        <td><input value={editUsername} onChange={(e) => setEditUsername(e.target.value)} /></td>
                         <td><input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} /></td>
                         <td><input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} /></td>
                         <td>
@@ -591,7 +652,8 @@ function ManagerUsers({
                     ) : (
                       <>
                         <td>{u.full_name}</td>
-                        <td>{u.email}</td>
+                        <td>{u.username}</td>
+                        <td>{u.email ?? "-"}</td>
                         <td>{u.phone || "-"}</td>
                         <td>{u.role}</td>
                         <td>{u.is_active ? "Yes" : "No"}</td>
@@ -1061,6 +1123,221 @@ function monthLabel(dateStr: string) {
   return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { month: "short", year: "2-digit" });
 }
 
+function ManagerScheduledEvaluations({
+  token,
+  users,
+  levels,
+  schedules,
+  form,
+  editingScheduleId,
+  scheduleSkills,
+  onFormChange,
+  onStartEdit,
+  onRefresh,
+  onSetError,
+}: {
+  token: string;
+  users: User[];
+  levels: Level[];
+  schedules: ScheduledEvaluation[];
+  form: {
+    instructorId: string;
+    supervisorId: string;
+    levelId: string;
+    skillId: string;
+    targetDate: string;
+    notes: string;
+  };
+  editingScheduleId: number | null;
+  scheduleSkills: Skill[];
+  onFormChange: Dispatch<SetStateAction<{
+    instructorId: string;
+    supervisorId: string;
+    levelId: string;
+    skillId: string;
+    targetDate: string;
+    notes: string;
+  }>>;
+  onStartEdit: Dispatch<SetStateAction<number | null>>;
+  onRefresh: () => Promise<void>;
+  onSetError: Dispatch<SetStateAction<string>>;
+}) {
+  const supervisors = users.filter((user) => user.role === "SUPERVISOR");
+  const instructors = users.filter((user) => user.role === "INSTRUCTOR");
+  const activeSchedules = schedules.filter((item) => item.status !== "COMPLETED" && item.status !== "CANCELED");
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!form.instructorId || !form.skillId || !form.targetDate) return;
+    try {
+      const payload = {
+        instructor_id: Number(form.instructorId),
+        skill_id: Number(form.skillId),
+        assigned_to_id: form.supervisorId ? Number(form.supervisorId) : null,
+        target_date: form.targetDate,
+        notes: form.notes.trim() || null,
+      };
+      if (editingScheduleId) {
+        await updateManagerScheduledEvaluation(token, editingScheduleId, payload);
+      } else {
+        await createManagerScheduledEvaluation(token, payload);
+      }
+      onStartEdit(null);
+      onFormChange({
+        instructorId: "",
+        supervisorId: "",
+        levelId: "",
+        skillId: "",
+        targetDate: new Date().toISOString().slice(0, 10),
+        notes: "",
+      });
+      await onRefresh();
+    } catch (err) {
+      onSetError((err as Error).message);
+    }
+  }
+
+  async function updateStatus(schedule: ScheduledEvaluation, status: ScheduledEvaluationStatus) {
+    try {
+      await updateManagerScheduledEvaluation(token, schedule.id, { status });
+      await onRefresh();
+    } catch (err) {
+      onSetError((err as Error).message);
+    }
+  }
+
+  async function removeSchedule(id: number) {
+    try {
+      await deleteManagerScheduledEvaluation(token, id);
+      await onRefresh();
+    } catch (err) {
+      onSetError((err as Error).message);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Assigned Evaluations</h2>
+      <form className="form" onSubmit={handleSubmit}>
+        <label>
+          Instructor
+          <select value={form.instructorId} onChange={(e) => onFormChange((prev) => ({ ...prev, instructorId: e.target.value }))}>
+            <option value="">Select instructor</option>
+            {instructors.map((user) => (
+              <option key={user.id} value={user.id}>{user.full_name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Assign To
+          <select value={form.supervisorId} onChange={(e) => onFormChange((prev) => ({ ...prev, supervisorId: e.target.value }))}>
+            <option value="">Unassigned</option>
+            {supervisors.map((user) => (
+              <option key={user.id} value={user.id}>{user.full_name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Level
+          <select value={form.levelId} onChange={(e) => onFormChange((prev) => ({ ...prev, levelId: e.target.value, skillId: "" }))}>
+            <option value="">Select level</option>
+            {levels.map((level) => (
+              <option key={level.id} value={level.id}>{level.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Skill
+          <select value={form.skillId} onChange={(e) => onFormChange((prev) => ({ ...prev, skillId: e.target.value }))}>
+            <option value="">Select skill</option>
+            {scheduleSkills.map((skill) => (
+              <option key={skill.id} value={skill.id}>{skill.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Target Date
+          <input type="date" value={form.targetDate} onChange={(e) => onFormChange((prev) => ({ ...prev, targetDate: e.target.value }))} />
+        </label>
+        <label>
+          Notes
+          <textarea value={form.notes} onChange={(e) => onFormChange((prev) => ({ ...prev, notes: e.target.value }))} />
+        </label>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button type="submit">{editingScheduleId ? "Update Assignment" : "Schedule Evaluation"}</button>
+          {editingScheduleId && (
+            <button
+              type="button"
+              className="btn-add"
+              onClick={() => {
+                onStartEdit(null);
+                onFormChange({
+                  instructorId: "",
+                  supervisorId: "",
+                  levelId: "",
+                  skillId: "",
+                  targetDate: new Date().toISOString().slice(0, 10),
+                  notes: "",
+                });
+              }}
+            >
+              Cancel Edit
+            </button>
+          )}
+        </div>
+      </form>
+
+      {activeSchedules.length > 0 ? (
+        <table style={{ marginTop: 16 }}>
+          <thead>
+            <tr>
+              <th>Instructor</th>
+              <th>Level</th>
+              <th>Skill</th>
+              <th>Target Date</th>
+              <th>Assigned To</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activeSchedules.map((schedule) => (
+              <tr key={schedule.id}>
+                <td>{schedule.instructor_name}</td>
+                <td>{schedule.level_name}</td>
+                <td>{schedule.skill_name}</td>
+                <td>{new Date(schedule.target_date + "T00:00:00").toLocaleDateString()}</td>
+                <td>{schedule.assigned_to_name ?? "Unassigned"}</td>
+                <td>{schedule.status}</td>
+                <td>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button type="button" onClick={() => void updateStatus(schedule, "IN_PROGRESS")}>Start</button>
+                    <button type="button" className="btn-add" onClick={() => {
+                      onStartEdit(schedule.id);
+                      onFormChange({
+                        instructorId: String(schedule.instructor_id),
+                        supervisorId: schedule.assigned_to_id ? String(schedule.assigned_to_id) : "",
+                        levelId: String(schedule.level_id),
+                        skillId: String(schedule.skill_id),
+                        targetDate: schedule.target_date,
+                        notes: schedule.notes ?? "",
+                      });
+                    }}>Edit</button>
+                    <button type="button" className="btn-add" onClick={() => void updateStatus(schedule, "CANCELED")}>Cancel</button>
+                    <button type="button" className="btn-add" onClick={() => void removeSchedule(schedule.id)}>Delete</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p style={{ color: "#64748b", fontSize: 14 }}>No active scheduled evaluations.</p>
+      )}
+    </div>
+  );
+}
+
 function ManagerDashboard({
   rows, onGo, onExportCsv, onEmailCsv, appliedManagerQuery, onView, onEdit, onDelete
 }: {
@@ -1175,7 +1452,7 @@ function ManagerDashboard({
       <div className="card">
         <h2>Recent Evaluations</h2>
         {recent.length > 0 ? (
-          <EvaluationTable rows={recent} onView={onView} onEdit={onEdit} onDelete={onDelete} />
+          <EvaluationTable rows={recent} onView={onView} onEdit={onEdit} onDelete={onDelete} showAcknowledged />
         ) : (
           <p style={{ color: "#64748b", fontSize: 14 }}>No evaluations yet.</p>
         )}

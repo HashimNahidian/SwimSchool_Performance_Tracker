@@ -1,9 +1,10 @@
 import enum
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -35,12 +36,16 @@ class School(Base):
 
 class User(Base):
     __tablename__ = "users"
-    __table_args__ = (UniqueConstraint("school_id", "email", name="uq_users_school_email"),)
+    __table_args__ = (
+        UniqueConstraint("school_id", "email", name="uq_users_school_email"),
+        UniqueConstraint("school_id", "username", name="uq_users_school_username"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     phone: Mapped[str | None] = mapped_column(String(25))
     password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), nullable=False)
@@ -117,9 +122,14 @@ class Evaluation(Base):
     instructor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
     supervisor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
     skill_id: Mapped[int] = mapped_column(ForeignKey("skills.id"), nullable=False, index=True)
+    scheduled_evaluation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("scheduled_evaluations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     notes: Mapped[str | None] = mapped_column(Text)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     final_grade: Mapped[int | None] = mapped_column(SmallInteger)
     needs_reevaluation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    instructor_acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -127,6 +137,7 @@ class Evaluation(Base):
     instructor: Mapped["User"] = relationship(foreign_keys=[instructor_id])
     supervisor: Mapped["User"] = relationship(foreign_keys=[supervisor_id])
     skill: Mapped["Skill"] = relationship()
+    scheduled_evaluation: Mapped["ScheduledEvaluation | None"] = relationship()
     ratings: Mapped[list["EvaluationRating"]] = relationship(
         back_populates="evaluation", cascade="all, delete-orphan"
     )
@@ -162,6 +173,13 @@ class ReevaluationStatus(str, enum.Enum):
     CANCELED = "CANCELED"
 
 
+class ScheduledEvaluationStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    CANCELED = "CANCELED"
+
+
 class ReevaluationRequest(Base):
     __tablename__ = "reevaluation_requests"
 
@@ -189,6 +207,34 @@ class ReevaluationRequest(Base):
         foreign_keys=[source_evaluation_id],
         back_populates="reevaluation_requests",
     )
+
+
+class ScheduledEvaluation(Base):
+    __tablename__ = "scheduled_evaluations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
+    instructor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    skill_id: Mapped[int] = mapped_column(ForeignKey("skills.id", ondelete="RESTRICT"), nullable=False, index=True)
+    target_date: Mapped[date] = mapped_column(Date(), nullable=False)
+    requested_by_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    assigned_to_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    status: Mapped[ScheduledEvaluationStatus] = mapped_column(
+        Enum(ScheduledEvaluationStatus, name="scheduled_evaluation_status"),
+        nullable=False,
+        default=ScheduledEvaluationStatus.PENDING,
+        server_default="PENDING",
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    school: Mapped["School"] = relationship()
+    instructor: Mapped["User"] = relationship(foreign_keys=[instructor_id])
+    skill: Mapped["Skill"] = relationship()
+    requested_by: Mapped["User"] = relationship(foreign_keys=[requested_by_id])
+    assigned_to: Mapped["User | None"] = relationship(foreign_keys=[assigned_to_id])
 
 
 class RefreshToken(Base):

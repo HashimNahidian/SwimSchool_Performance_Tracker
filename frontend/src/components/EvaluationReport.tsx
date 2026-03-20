@@ -1,4 +1,5 @@
 import type { EvaluationDetail } from "../types";
+import { formatDurationSeconds } from "./EvaluationTimer";
 import { WaveLogo } from "./WaveLogo";
 
 const RATING_LABEL: Record<number, string> = {
@@ -55,6 +56,10 @@ function ReportContent({ ev }: { ev: EvaluationDetail }) {
             {new Date(ev.created_at).toLocaleDateString()}
           </span>
         </div>
+        <div className="report-info-item">
+          <span className="report-info-label">Time Teaching</span>
+          <span className="report-info-value">{formatDurationSeconds(ev.duration_seconds)}</span>
+        </div>
         {ev.final_grade != null && (
           <div className="report-info-item">
             <span className="report-info-label">Final Grade</span>
@@ -72,6 +77,14 @@ function ReportContent({ ev }: { ev: EvaluationDetail }) {
         <div className="report-info-item">
           <span className="report-info-label">Evaluation ID</span>
           <span className="report-info-value">#{ev.id}</span>
+        </div>
+        <div className="report-info-item">
+          <span className="report-info-label">Read Status</span>
+          <span className="report-info-value">
+            {ev.instructor_acknowledged_at
+              ? `Read at ${new Date(ev.instructor_acknowledged_at).toLocaleString()}`
+              : "Not read"}
+          </span>
         </div>
       </div>
 
@@ -128,9 +141,13 @@ function ReportContent({ ev }: { ev: EvaluationDetail }) {
 export function EvaluationReportModal({
   evaluation,
   onClose,
+  onAcknowledge,
+  acknowledging = false,
 }: {
   evaluation: EvaluationDetail | null;
   onClose: () => void;
+  onAcknowledge?: (id: number) => void;
+  acknowledging?: boolean;
 }) {
   if (!evaluation) return null;
 
@@ -142,6 +159,11 @@ export function EvaluationReportModal({
             Evaluation Report — #{evaluation.id}
           </span>
           <div style={{ display: "flex", gap: 8 }}>
+            {onAcknowledge && !evaluation.instructor_acknowledged_at && (
+              <button type="button" onClick={() => onAcknowledge(evaluation.id)} disabled={acknowledging}>
+                {acknowledging ? "Acknowledging..." : "Acknowledge"}
+              </button>
+            )}
             <button onClick={() => window.print()}>🖨 Print / Save PDF</button>
             <button className="btn-add" onClick={onClose}>✕ Close</button>
           </div>
