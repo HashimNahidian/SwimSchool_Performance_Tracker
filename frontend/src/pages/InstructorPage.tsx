@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth";
-import { getInstructorEvaluationDetail, listInstructorEvaluations } from "../api";
+import { acknowledgeInstructorEvaluation, getInstructorEvaluationDetail, listInstructorEvaluations } from "../api";
 import type { EvaluationDetail, EvaluationSummary } from "../types";
 import { EvaluationTable } from "../components/EvaluationTable";
 import { EvaluationReportModal } from "../components/EvaluationReport";
@@ -10,6 +10,7 @@ export function InstructorPage() {
   const [error, setError] = useState("");
   const [reportEval, setReportEval] = useState<EvaluationDetail | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [acknowledging, setAcknowledging] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -46,6 +47,21 @@ export function InstructorPage() {
     }
   }
 
+  async function handleAcknowledge(id: number) {
+    if (!token) return;
+    setAcknowledging(true);
+    setError("");
+    try {
+      const updated = await acknowledgeInstructorEvaluation(token, id);
+      setRawEvaluations((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setReportEval(updated);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAcknowledging(false);
+    }
+  }
+
   return (
     <>
       {error && <p className="error">{error}</p>}
@@ -63,13 +79,20 @@ export function InstructorPage() {
           {loadingReport && <span style={{ fontSize: 13, color: "#64748b", fontWeight: 400 }}>Loading...</span>}
         </h2>
         {evaluationsByDate.length > 0 ? (
-          <EvaluationTable rows={evaluationsByDate} onView={handleViewReport} />
+          <EvaluationTable rows={evaluationsByDate} onView={handleViewReport} showAcknowledged />
         ) : (
           <p style={{ color: "#64748b", fontSize: 14 }}>No evaluations yet.</p>
         )}
       </div>
 
-      {reportEval && <EvaluationReportModal evaluation={reportEval} onClose={() => setReportEval(null)} />}
+      {reportEval && (
+        <EvaluationReportModal
+          evaluation={reportEval}
+          onClose={() => setReportEval(null)}
+          onAcknowledge={handleAcknowledge}
+          acknowledging={acknowledging}
+        />
+      )}
     </>
   );
 }

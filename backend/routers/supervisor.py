@@ -12,6 +12,8 @@ from models import (
     Level,
     ReevaluationRequest,
     ReevaluationStatus,
+    ScheduledEvaluation,
+    ScheduledEvaluationStatus,
     Skill,
     SkillAttribute,
     User,
@@ -25,20 +27,28 @@ from schemas import (
     EvaluationUpdate,
     LevelOut,
     ReevaluationRequestOut,
+    ScheduledEvaluationCreate,
+    ScheduledEvaluationOut,
+    ScheduledEvaluationUpdate,
     SkillOut,
     UserOut,
 )
 from services import (
     clear_reevaluation_for_skill,
+    create_scheduled_evaluation,
     ensure_skill_in_school,
     ensure_user_role,
     evaluation_detail_row,
     evaluation_query_with_joins,
     evaluation_summary_row,
+    get_scheduled_evaluation_or_404,
+    get_scheduled_evaluations,
     recalculate_final_grade,
     reevaluation_request_row,
+    scheduled_evaluation_row,
     sync_ratings,
     sync_reevaluation_state,
+    update_scheduled_evaluation,
 )
 
 
@@ -155,6 +165,65 @@ def list_my_evaluations(
     return [evaluation_summary_row(item) for item in evaluations]
 
 
+@router.get("/scheduled-evaluations", response_model=list[ScheduledEvaluationOut], dependencies=[supervisor_guard])
+def list_scheduled_evaluations(
+    instructor_id: int | None = None,
+    skill_id: int | None = None,
+    status: ScheduledEvaluationStatus | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
+) -> list[ScheduledEvaluationOut]:
+    items = get_scheduled_evaluations(
+        db,
+        current_user.school_id,
+        instructor_id=instructor_id,
+        skill_id=skill_id,
+        assigned_to_id=current_user.id,
+        include_unassigned=True,
+        status=status,
+    )
+    return [scheduled_evaluation_row(item) for item in items]
+
+
+@router.post("/scheduled-evaluations", response_model=ScheduledEvaluationOut, dependencies=[supervisor_guard])
+def create_my_scheduled_evaluation(
+    payload: ScheduledEvaluationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
+) -> ScheduledEvaluationOut:
+    assigned_to_id = payload.assigned_to_id if payload.assigned_to_id is not None else current_user.id
+    item = create_scheduled_evaluation(
+        db,
+        school_id=current_user.school_id,
+        requested_by_id=current_user.id,
+        payload=payload.model_copy(update={"assigned_to_id": assigned_to_id}),
+    )
+    return scheduled_evaluation_row(item)
+
+
+@router.put("/scheduled-evaluations/{schedule_id}", response_model=ScheduledEvaluationOut, dependencies=[supervisor_guard])
+def update_my_scheduled_evaluation(
+    schedule_id: int,
+    payload: ScheduledEvaluationUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
+) -> ScheduledEvaluationOut:
+    item = get_scheduled_evaluation_or_404(db, schedule_id, current_user.school_id)
+    updated = update_scheduled_evaluation(db, item, payload)
+    return scheduled_evaluation_row(updated)
+
+
+@router.delete("/scheduled-evaluations/{schedule_id}", status_code=204, dependencies=[supervisor_guard])
+def delete_my_scheduled_evaluation(
+    schedule_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
+) -> None:
+    item = get_scheduled_evaluation_or_404(db, schedule_id, current_user.school_id)
+    db.delete(item)
+    db.commit()
+
+
 @router.post("/evaluations", response_model=EvaluationDetailOut, dependencies=[supervisor_guard])
 def create_evaluation(
     payload: EvaluationCreate,
@@ -169,9 +238,15 @@ def create_evaluation(
         instructor_id=payload.instructor_id,
         supervisor_id=current_user.id,
         skill_id=payload.skill_id,
+        scheduled_evaluation_id=payload.scheduled_evaluation_id,
         notes=payload.notes,
+        duration_seconds=payload.duration_seconds,
         needs_reevaluation=payload.needs_reevaluation,
     )
+    if payload.scheduled_evaluation_id is not None:
+        schedule = get_scheduled_evaluation_or_404(db, payload.scheduled_evaluation_id, current_user.school_id)
+        schedule.status = ScheduledEvaluationStatus.COMPLETED
+        schedule.completed_at = datetime.now(timezone.utc)
     db.add(evaluation)
     db.flush()
     sync_ratings(db, evaluation, [(r.attribute_id, r.rating, r.comment) for r in payload.ratings])
@@ -204,6 +279,7 @@ def update_evaluation(
         raise HTTPException(status_code=404, detail="Evaluation not found")
 
     evaluation.notes = payload.notes
+    evaluation.duration_seconds = payload.duration_seconds
     if payload.ratings is not None:
         sync_ratings(db, evaluation, [(r.attribute_id, r.rating, r.comment) for r in payload.ratings])
     db.flush()

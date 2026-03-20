@@ -1,6 +1,6 @@
 import csv
 import io
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -13,6 +13,8 @@ from models import (
     Level,
     ReevaluationRequest,
     ReevaluationStatus,
+    ScheduledEvaluation,
+    ScheduledEvaluationStatus,
     Skill,
     SkillAttribute,
     User,
@@ -23,6 +25,9 @@ from schemas import (
     EvaluationSummaryOut,
     ReevaluationRequestOut,
     RatingOut,
+    ScheduledEvaluationCreate,
+    ScheduledEvaluationOut,
+    ScheduledEvaluationUpdate,
 )
 
 REEVALUATION_GRADE_THRESHOLD = 2
@@ -251,8 +256,11 @@ def evaluation_summary_row(evaluation: Evaluation) -> EvaluationSummaryOut:
         level_name=level.name,
         skill_id=evaluation.skill_id,
         skill_name=evaluation.skill.name,
+        scheduled_evaluation_id=evaluation.scheduled_evaluation_id,
+        duration_seconds=evaluation.duration_seconds,
         final_grade=evaluation.final_grade,
         needs_reevaluation=evaluation.needs_reevaluation,
+        instructor_acknowledged_at=evaluation.instructor_acknowledged_at,
         created_at=evaluation.created_at,
         updated_at=evaluation.updated_at,
     )
@@ -347,3 +355,165 @@ def evaluations_to_csv(evaluations: list[Evaluation]) -> str:
                 ]
             )
     return output.getvalue()
+
+
+def scheduled_evaluation_row(item: ScheduledEvaluation) -> ScheduledEvaluationOut:
+    return ScheduledEvaluationOut(
+        id=item.id,
+        school_id=item.school_id,
+        instructor_id=item.instructor_id,
+        instructor_name=item.instructor.full_name,
+        skill_id=item.skill_id,
+        skill_name=item.skill.name,
+        level_id=item.skill.level.id,
+        level_name=item.skill.level.name,
+        target_date=item.target_date,
+        requested_by_id=item.requested_by_id,
+        requested_by_name=item.requested_by.full_name,
+        assigned_to_id=item.assigned_to_id,
+        assigned_to_name=item.assigned_to.full_name if item.assigned_to else None,
+        status=item.status,
+        notes=item.notes,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+        completed_at=item.completed_at,
+    )
+
+
+def scheduled_evaluation_query(school_id: int):
+    return (
+        select(ScheduledEvaluation)
+        .where(ScheduledEvaluation.school_id == school_id)
+        .options(
+            joinedload(ScheduledEvaluation.instructor),
+            joinedload(ScheduledEvaluation.skill).joinedload(Skill.level),
+            joinedload(ScheduledEvaluation.requested_by),
+            joinedload(ScheduledEvaluation.assigned_to),
+        )
+        .order_by(ScheduledEvaluation.target_date.asc(), ScheduledEvaluation.id.desc())
+    )
+
+
+def get_scheduled_evaluations(
+    db: Session,
+    school_id: int,
+    *,
+    instructor_id: int | None = None,
+    skill_id: int | None = None,
+    assigned_to_id: int | None = None,
+    include_unassigned: bool = False,
+    status: ScheduledEvaluationStatus | None = None,
+) -> list[ScheduledEvaluation]:
+    stmt = scheduled_evaluation_query(school_id)
+    if instructor_id is not None:
+        stmt = stmt.where(ScheduledEvaluation.instructor_id == instructor_id)
+    if skill_id is not None:
+        stmt = stmt.where(ScheduledEvaluation.skill_id == skill_id)
+    if status is not None:
+        stmt = stmt.where(ScheduledEvaluation.status == status)
+    if assigned_to_id is not None:
+        if include_unassigned:
+            stmt = stmt.where(
+                (ScheduledEvaluation.assigned_to_id == assigned_to_id) | (ScheduledEvaluation.assigned_to_id.is_(None))
+            )
+        else:
+            stmt = stmt.where(ScheduledEvaluation.assigned_to_id == assigned_to_id)
+    return db.scalars(stmt).all()
+
+
+def _ensure_schedule_assignment_user(
+    db: Session,
+    *,
+    user_id: int | None,
+    school_id: int,
+) -> User | None:
+    if user_id is None:
+        return None
+    user = db.get(User, user_id)
+    if (
+        not user
+        or user.school_id != school_id
+        or user.role not in {UserRole.SUPERVISOR, UserRole.MANAGER}
+        or not user.is_active
+    ):
+        raise HTTPException(status_code=400, detail="Assigned user must be an active supervisor or manager")
+    return user
+
+
+def get_scheduled_evaluation_or_404(db: Session, schedule_id: int, school_id: int) -> ScheduledEvaluation:
+    schedule = db.scalar(scheduled_evaluation_query(school_id).where(ScheduledEvaluation.id == schedule_id))
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Scheduled evaluation not found")
+    return schedule
+
+
+def create_scheduled_evaluation(
+    db: Session,
+    *,
+    school_id: int,
+    requested_by_id: int,
+    payload: ScheduledEvaluationCreate,
+) -> ScheduledEvaluation:
+    ensure_user_role(db, payload.instructor_id, UserRole.INSTRUCTOR, school_id)
+    ensure_skill_in_school(db, payload.skill_id, school_id)
+    _ensure_schedule_assignment_user(db, user_id=payload.assigned_to_id, school_id=school_id)
+    item = ScheduledEvaluation(
+        school_id=school_id,
+        instructor_id=payload.instructor_id,
+        skill_id=payload.skill_id,
+        target_date=payload.target_date,
+        requested_by_id=requested_by_id,
+        assigned_to_id=payload.assigned_to_id,
+        status=payload.status,
+        notes=payload.notes,
+    )
+    if item.status == ScheduledEvaluationStatus.COMPLETED:
+        item.completed_at = datetime.now(timezone.utc)
+    db.add(item)
+    db.commit()
+    return get_scheduled_evaluation_or_404(db, item.id, school_id)
+
+
+def assign_scheduled_evaluation(
+    db: Session,
+    schedule: ScheduledEvaluation,
+    assigned_to_id: int | None,
+) -> ScheduledEvaluation:
+    _ensure_schedule_assignment_user(db, user_id=assigned_to_id, school_id=schedule.school_id)
+    schedule.assigned_to_id = assigned_to_id
+    return schedule
+
+
+def update_scheduled_evaluation(
+    db: Session,
+    schedule: ScheduledEvaluation,
+    payload: ScheduledEvaluationUpdate,
+) -> ScheduledEvaluation:
+    updates = payload.model_dump(exclude_unset=True)
+    if "instructor_id" in updates and updates["instructor_id"] is not None:
+        ensure_user_role(db, updates["instructor_id"], UserRole.INSTRUCTOR, schedule.school_id)
+    if "skill_id" in updates and updates["skill_id"] is not None:
+        ensure_skill_in_school(db, updates["skill_id"], schedule.school_id)
+    if "assigned_to_id" in updates:
+        assign_scheduled_evaluation(db, schedule, updates.pop("assigned_to_id"))
+    previous_status = schedule.status
+    for field, value in updates.items():
+        setattr(schedule, field, value)
+    if schedule.status == ScheduledEvaluationStatus.COMPLETED and previous_status != ScheduledEvaluationStatus.COMPLETED:
+        schedule.completed_at = datetime.now(timezone.utc)
+    elif schedule.status != ScheduledEvaluationStatus.COMPLETED:
+        schedule.completed_at = None
+    db.commit()
+    return get_scheduled_evaluation_or_404(db, schedule.id, schedule.school_id)
+
+
+def delete_scheduled_evaluation(db: Session, schedule: ScheduledEvaluation) -> None:
+    db.delete(schedule)
+    db.commit()
+
+
+def complete_scheduled_evaluation(db: Session, schedule: ScheduledEvaluation) -> ScheduledEvaluation:
+    schedule.status = ScheduledEvaluationStatus.COMPLETED
+    schedule.completed_at = datetime.now(timezone.utc)
+    db.commit()
+    return get_scheduled_evaluation_or_404(db, schedule.id, schedule.school_id)

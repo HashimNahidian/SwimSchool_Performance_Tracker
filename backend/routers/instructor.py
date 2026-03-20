@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_
@@ -59,3 +59,33 @@ def get_my_evaluation(
     if not evaluation:
         raise HTTPException(status_code=404, detail="Evaluation not found")
     return evaluation_detail_row(evaluation)
+
+
+@router.post(
+    "/evaluations/{evaluation_id}/acknowledge",
+    response_model=EvaluationDetailOut,
+    dependencies=[instructor_guard],
+)
+def acknowledge_evaluation(
+    evaluation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.INSTRUCTOR)),
+) -> EvaluationDetailOut:
+    evaluation = db.get(Evaluation, evaluation_id)
+    if not evaluation or evaluation.school_id != current_user.school_id:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    if evaluation.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You cannot acknowledge another instructor's evaluation")
+
+    evaluation.instructor_acknowledged_at = datetime.now(timezone.utc)
+    db.commit()
+
+    full = db.scalar(
+        evaluation_query_with_joins(current_user.school_id).where(
+            Evaluation.id == evaluation_id,
+            Evaluation.instructor_id == current_user.id,
+        )
+    )
+    if not full:
+        raise HTTPException(status_code=500, detail="Failed to reload evaluation")
+    return evaluation_detail_row(full)

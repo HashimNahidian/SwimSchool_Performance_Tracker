@@ -26,24 +26,29 @@ export function SupervisorEvaluationsPage() {
     applyFilters,
     clearFilters,
     filteredRows,
-    filteredReevaluations,
+    filteredAssignedEvaluations,
     openDetail,
-    handleCompleteReevaluation,
     handleSaved,
     handleCreated,
   } = useSupervisorData();
-  const [reevaluationPrefill, setReevaluationPrefill] = useState<ReevaluationPrefill | null>(null);
+  const [showCreateInput, setShowCreateInput] = useState(false);
+  const [selectedReeval, setSelectedReeval] = useState<ReevaluationPrefill | null>(null);
 
   if (!token) return null;
 
   function handleReevaluate(evaluationId: number) {
     const row = filteredRows.find((item) => item.id === evaluationId);
     if (!row) return;
-    setReevaluationPrefill({
+    setSelectedReeval({
       evaluationId: row.id,
       instructorId: row.instructor_id,
+      levelId: row.level_id,
       skillId: row.skill_id,
+      sourceEvalId: row.id,
+      mode: "reevaluation",
     });
+    setShowCreateInput(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   return (
@@ -61,6 +66,25 @@ export function SupervisorEvaluationsPage() {
         flaggedActive={needsReevalMode}
         onFlaggedClick={() => setNeedsReevalMode((prev) => !prev)}
       />
+
+      {showCreateInput && selectedReeval && (
+        <SupervisorCreateEvaluation
+          token={token}
+          users={users}
+          levels={levels}
+          skills={skills}
+          prefill={selectedReeval}
+          onCreated={(created) => {
+            handleCreated(created);
+            setSelectedReeval(null);
+            setShowCreateInput(false);
+          }}
+          onCancel={() => {
+            setSelectedReeval(null);
+            setShowCreateInput(false);
+          }}
+        />
+      )}
 
       <div className="evaluation-layout">
         <aside className="evaluation-sidebar">
@@ -117,10 +141,10 @@ export function SupervisorEvaluationsPage() {
           <SupervisorReevaluationPanel
             users={users}
             skills={skills}
-            filteredReevaluations={filteredReevaluations}
+            assignedEvaluations={filteredAssignedEvaluations}
             filters={filters}
             setFilters={setFilters}
-            onComplete={handleCompleteReevaluation}
+            onReevaluate={(evaluation) => handleReevaluate(evaluation.id)}
             showControls={false}
           />
 
@@ -150,21 +174,6 @@ export function SupervisorEvaluationsPage() {
       </div>
         </div>
       </div>
-
-      {reevaluationPrefill && (
-        <SupervisorCreateEvaluation
-          token={token}
-          users={users}
-          levels={levels}
-          skills={skills}
-          prefill={reevaluationPrefill}
-          onCreated={(created) => {
-            handleCreated(created);
-            setReevaluationPrefill(null);
-          }}
-          onCancel={() => setReevaluationPrefill(null)}
-        />
-      )}
 
       {reportEval && <EvaluationReportModal evaluation={reportEval} onClose={() => setReportEval(null)} />}
 

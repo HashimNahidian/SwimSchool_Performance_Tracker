@@ -4,6 +4,7 @@ import type {
   EvaluationSummary,
   Level,
   ReevaluationRequest,
+  ScheduledEvaluation,
   Skill,
   TokenResponse,
   User
@@ -52,8 +53,9 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
-export function login(email: string, password: string): Promise<TokenResponse> {
-  return request("/auth/login", "POST", { email, password });
+// username-first identity activation
+export function login(username: string, password: string): Promise<TokenResponse> {
+  return request("/auth/login", "POST", { username, password });
 }
 
 export function refresh(refreshToken: string): Promise<TokenResponse> {
@@ -76,7 +78,8 @@ export function createUser(
   token: string,
   payload: {
     full_name: string;
-    email: string;
+    username: string;
+    email?: string | null;
     phone?: string | null;
     password: string;
     role: "MANAGER" | "SUPERVISOR" | "INSTRUCTOR";
@@ -91,7 +94,8 @@ export function updateUser(
   userId: number,
   payload: {
     full_name?: string;
-    email?: string;
+    username?: string;
+    email?: string | null;
     phone?: string | null;
     role?: "MANAGER" | "SUPERVISOR" | "INSTRUCTOR";
     is_active?: boolean;
@@ -263,7 +267,10 @@ export function createSupervisorEvaluation(
   payload: {
     instructor_id: number;
     skill_id: number;
+    source_evaluation_id?: number | null;
+    scheduled_evaluation_id?: number | null;
     notes?: string;
+    duration_seconds?: number | null;
     ratings: Array<{ attribute_id: number; rating: number; comment?: string | null }>;
     needs_reevaluation?: boolean;
   }
@@ -291,6 +298,10 @@ export function getInstructorEvaluationDetail(token: string, id: number): Promis
   return request(`/instructor/evaluations/${id}`, "GET", undefined, token);
 }
 
+export function acknowledgeInstructorEvaluation(token: string, id: number): Promise<EvaluationDetail> {
+  return request(`/instructor/evaluations/${id}/acknowledge`, "POST", undefined, token);
+}
+
 export function getSupervisorEvaluationDetail(token: string, id: number): Promise<EvaluationDetail> {
   return request(`/supervisor/evaluations/${id}`, "GET", undefined, token);
 }
@@ -300,6 +311,7 @@ export function updateSupervisorEvaluation(
   id: number,
   payload: {
     notes?: string | null;
+    duration_seconds?: number | null;
     ratings?: Array<{ attribute_id: number; rating: number; comment?: string | null }>;
     needs_reevaluation?: boolean;
   }
@@ -316,6 +328,7 @@ export function updateManagerEvaluation(
   id: number,
   payload: {
     notes?: string | null;
+    duration_seconds?: number | null;
     ratings?: Array<{ attribute_id: number; rating: number; comment?: string | null }>;
     needs_reevaluation?: boolean;
   }
@@ -359,4 +372,95 @@ export function completeSupervisorReevaluation(
   id: number
 ): Promise<ReevaluationRequest> {
   return request(`/supervisor/reevaluations/${id}/complete`, "PUT", undefined, token);
+}
+
+export function listSupervisorScheduledEvaluations(
+  token: string,
+  query?: { instructor_id?: number; skill_id?: number; status?: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CANCELED" }
+): Promise<ScheduledEvaluation[]> {
+  const params = new URLSearchParams();
+  if (query?.instructor_id !== undefined) params.set("instructor_id", String(query.instructor_id));
+  if (query?.skill_id !== undefined) params.set("skill_id", String(query.skill_id));
+  if (query?.status !== undefined) params.set("status", query.status);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return request(`/supervisor/scheduled-evaluations${suffix}`, "GET", undefined, token);
+}
+
+export function createSupervisorScheduledEvaluation(
+  token: string,
+  payload: {
+    instructor_id: number;
+    skill_id: number;
+    target_date: string;
+    assigned_to_id?: number | null;
+    status?: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CANCELED";
+    notes?: string | null;
+  }
+): Promise<ScheduledEvaluation> {
+  return request("/supervisor/scheduled-evaluations", "POST", payload, token);
+}
+
+export function updateSupervisorScheduledEvaluation(
+  token: string,
+  id: number,
+  payload: {
+    instructor_id?: number;
+    skill_id?: number;
+    target_date?: string;
+    assigned_to_id?: number | null;
+    status?: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CANCELED";
+    notes?: string | null;
+  }
+): Promise<ScheduledEvaluation> {
+  return request(`/supervisor/scheduled-evaluations/${id}`, "PUT", payload, token);
+}
+
+export function deleteSupervisorScheduledEvaluation(token: string, id: number): Promise<void> {
+  return request(`/supervisor/scheduled-evaluations/${id}`, "DELETE", undefined, token);
+}
+
+export function listManagerScheduledEvaluations(
+  token: string,
+  query?: { instructor_id?: number; skill_id?: number; assigned_to_id?: number; status?: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CANCELED" }
+): Promise<ScheduledEvaluation[]> {
+  const params = new URLSearchParams();
+  if (query?.instructor_id !== undefined) params.set("instructor_id", String(query.instructor_id));
+  if (query?.skill_id !== undefined) params.set("skill_id", String(query.skill_id));
+  if (query?.assigned_to_id !== undefined) params.set("assigned_to_id", String(query.assigned_to_id));
+  if (query?.status !== undefined) params.set("status", query.status);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return request(`/manager/scheduled-evaluations${suffix}`, "GET", undefined, token);
+}
+
+export function createManagerScheduledEvaluation(
+  token: string,
+  payload: {
+    instructor_id: number;
+    skill_id: number;
+    target_date: string;
+    assigned_to_id?: number | null;
+    status?: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CANCELED";
+    notes?: string | null;
+  }
+): Promise<ScheduledEvaluation> {
+  return request("/manager/scheduled-evaluations", "POST", payload, token);
+}
+
+export function updateManagerScheduledEvaluation(
+  token: string,
+  id: number,
+  payload: {
+    instructor_id?: number;
+    skill_id?: number;
+    target_date?: string;
+    assigned_to_id?: number | null;
+    status?: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CANCELED";
+    notes?: string | null;
+  }
+): Promise<ScheduledEvaluation> {
+  return request(`/manager/scheduled-evaluations/${id}`, "PUT", payload, token);
+}
+
+export function deleteManagerScheduledEvaluation(token: string, id: number): Promise<void> {
+  return request(`/manager/scheduled-evaluations/${id}`, "DELETE", undefined, token);
 }

@@ -4,7 +4,8 @@ export type User = {
   id: number;
   school_id: number;
   full_name: string;
-  email: string;
+  username: string;
+  email?: string | null;
   phone?: string | null;
   role: UserRole;
   is_active: boolean;
@@ -50,8 +51,11 @@ export type EvaluationSummary = {
   level_name: string;
   skill_id: number;
   skill_name: string;
+  scheduled_evaluation_id?: number | null;
+  duration_seconds: number | null;
   final_grade: number | null;
   needs_reevaluation: boolean;
+  instructor_acknowledged_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -69,6 +73,7 @@ export type EvaluationDetail = EvaluationSummary & {
 };
 
 export type ReevaluationStatus = "OPEN" | "COMPLETED" | "CANCELED";
+export type ScheduledEvaluationStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CANCELED";
 
 export type ReevaluationRequest = {
   id: number;
@@ -85,4 +90,25 @@ export type ReevaluationRequest = {
   requested_at: string;
   completed_at: string | null;
   notes: string | null;
+};
+
+export type ScheduledEvaluation = {
+  id: number;
+  school_id: number;
+  instructor_id: number;
+  instructor_name: string;
+  skill_id: number;
+  skill_name: string;
+  level_id: number;
+  level_name: string;
+  target_date: string;
+  requested_by_id: number;
+  requested_by_name: string;
+  assigned_to_id: number | null;
+  assigned_to_name: string | null;
+  status: ScheduledEvaluationStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
 };

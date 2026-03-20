@@ -17,6 +17,7 @@ from models import (
     Level,
     ReevaluationRequest,
     ReevaluationStatus,
+    ScheduledEvaluationStatus,
     Skill,
     SkillAttribute,
     User,
@@ -35,6 +36,9 @@ from schemas import (
     LevelUpdate,
     SkillAttributeIn,
     SkillBase,
+    ScheduledEvaluationCreate,
+    ScheduledEvaluationOut,
+    ScheduledEvaluationUpdate,
     SkillOut,
     SkillUpdate,
     UserCreate,
@@ -44,20 +48,36 @@ from schemas import (
 )
 from security import hash_password
 from services import (
+    create_scheduled_evaluation,
     evaluation_detail_row,
     evaluation_query_with_joins,
     evaluation_summary_row,
     evaluations_to_csv,
+    get_scheduled_evaluation_or_404,
+    get_scheduled_evaluations,
     recalculate_final_grade,
     reevaluation_request_row,
+    scheduled_evaluation_row,
     sync_ratings,
     sync_reevaluation_state,
+    update_scheduled_evaluation,
 )
 
 
 router = APIRouter(prefix="/manager", tags=["manager"])
 manager_guard = Depends(require_roles(UserRole.MANAGER))
 logger = logging.getLogger(__name__)
+
+
+def _normalize_username(value: str) -> str:
+    return value.strip().lower()
+
+
+def _normalize_email(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip().lower()
+    return cleaned or None
 
 
 def apply_evaluation_filters(
@@ -157,8 +177,16 @@ def create_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.MANAGER)),
 ) -> User:
-    normalized_email = payload.email.strip().lower()
+    normalized_username = _normalize_username(payload.username)
     if db.scalar(
+        select(User.id).where(
+            User.school_id == current_user.school_id,
+            User.username == normalized_username,
+        )
+    ):
+        raise HTTPException(status_code=400, detail="Username already exists for this school")
+    normalized_email = _normalize_email(payload.email)
+    if normalized_email and db.scalar(
         select(User.id).where(
             User.school_id == current_user.school_id,
             User.email == normalized_email,
@@ -168,6 +196,7 @@ def create_user(
     user = User(
         school_id=current_user.school_id,
         full_name=payload.full_name,
+        username=normalized_username,
         email=normalized_email,
         phone=payload.phone.strip() if payload.phone else None,
         password_hash=hash_password(payload.password),
@@ -192,17 +221,30 @@ def update_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     updates = payload.model_dump(exclude_unset=True)
-    if "email" in updates:
-        normalized_email = updates["email"].strip().lower()
+    if "username" in updates:
+        normalized_username = _normalize_username(updates["username"])
         existing = db.scalar(
             select(User.id).where(
                 User.school_id == current_user.school_id,
-                User.email == normalized_email,
+                User.username == normalized_username,
                 User.id != user.id,
             )
         )
         if existing:
-            raise HTTPException(status_code=400, detail="Email already exists")
+            raise HTTPException(status_code=400, detail="Username already exists for this school")
+        updates["username"] = normalized_username
+    if "email" in updates:
+        normalized_email = _normalize_email(updates["email"])
+        if normalized_email:
+            existing = db.scalar(
+                select(User.id).where(
+                    User.school_id == current_user.school_id,
+                    User.email == normalized_email,
+                    User.id != user.id,
+                )
+            )
+            if existing:
+                raise HTTPException(status_code=400, detail="Email already exists")
         updates["email"] = normalized_email
     if "phone" in updates and updates["phone"] is not None:
         updates["phone"] = updates["phone"].strip() or None
@@ -625,6 +667,9 @@ def update_evaluation(
         raise HTTPException(status_code=404, detail="Evaluation not found")
 
     evaluation.notes = payload.notes
+    if payload.scheduled_evaluation_id is not None:
+        evaluation.scheduled_evaluation_id = payload.scheduled_evaluation_id
+    evaluation.duration_seconds = payload.duration_seconds
     if payload.ratings is not None:
         sync_ratings(db, evaluation, [(r.attribute_id, r.rating, r.comment) for r in payload.ratings])
     db.flush()
@@ -658,6 +703,64 @@ def delete_evaluation(
     if not evaluation:
         raise HTTPException(status_code=404, detail="Evaluation not found")
     db.delete(evaluation)
+    db.commit()
+
+
+@router.get("/scheduled-evaluations", response_model=list[ScheduledEvaluationOut], dependencies=[manager_guard])
+def list_scheduled_evaluations(
+    instructor_id: int | None = None,
+    skill_id: int | None = None,
+    assigned_to_id: int | None = None,
+    status: ScheduledEvaluationStatus | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> list[ScheduledEvaluationOut]:
+    items = get_scheduled_evaluations(
+        db,
+        current_user.school_id,
+        instructor_id=instructor_id,
+        skill_id=skill_id,
+        assigned_to_id=assigned_to_id,
+        status=status,
+    )
+    return [scheduled_evaluation_row(item) for item in items]
+
+
+@router.post("/scheduled-evaluations", response_model=ScheduledEvaluationOut, dependencies=[manager_guard])
+def create_manager_scheduled_evaluation(
+    payload: ScheduledEvaluationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> ScheduledEvaluationOut:
+    item = create_scheduled_evaluation(
+        db,
+        school_id=current_user.school_id,
+        requested_by_id=current_user.id,
+        payload=payload,
+    )
+    return scheduled_evaluation_row(item)
+
+
+@router.put("/scheduled-evaluations/{schedule_id}", response_model=ScheduledEvaluationOut, dependencies=[manager_guard])
+def update_manager_scheduled_evaluation(
+    schedule_id: int,
+    payload: ScheduledEvaluationUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> ScheduledEvaluationOut:
+    item = get_scheduled_evaluation_or_404(db, schedule_id, current_user.school_id)
+    updated = update_scheduled_evaluation(db, item, payload)
+    return scheduled_evaluation_row(updated)
+
+
+@router.delete("/scheduled-evaluations/{schedule_id}", status_code=204, dependencies=[manager_guard])
+def delete_manager_scheduled_evaluation(
+    schedule_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.MANAGER)),
+) -> None:
+    item = get_scheduled_evaluation_or_404(db, schedule_id, current_user.school_id)
+    db.delete(item)
     db.commit()
 
 

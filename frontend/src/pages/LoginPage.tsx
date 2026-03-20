@@ -5,7 +5,7 @@ import { WaveLogo } from "../components/WaveLogo";
 
 export function LoginPage() {
   const { login, user } = useAuth();
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -19,7 +19,7 @@ export function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await login(email, password);
+      await login(username, password);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -38,14 +38,15 @@ export function LoginPage() {
 
         <form onSubmit={onSubmit} className="login-form">
           <label className="login-label">
-            Email
+            Username
             <input
-              type="email"
+              type="text"
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="instructor@propelswim.com"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="sarah_johnson or instructor@propelswim.com"
               className="login-input"
+              autoComplete="username"
             />
           </label>
           <label className="login-label">

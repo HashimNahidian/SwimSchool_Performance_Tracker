@@ -44,10 +44,12 @@ def create_user(
     name: str,
     email: str,
     role: models.UserRole,
+    username: str | None = None,
 ) -> models.User:
     user = models.User(
         school_id=school_id,
         full_name=name,
+        username=username or email.split("@")[0].lower(),
         email=email,
         password_hash=hash_password("TestPass123!"),
         role=role,

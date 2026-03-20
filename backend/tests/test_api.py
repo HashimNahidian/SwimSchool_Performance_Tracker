@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -60,10 +61,12 @@ def create_user(
     email: str,
     role: models.UserRole,
     school_id: int,
+    username: str | None = None,
 ) -> models.User:
     user = models.User(
         school_id=school_id,
         full_name=name,
+        username=username or email.split("@")[0].lower(),
         email=email,
         password_hash=hash_password("TestPass123!"),
         role=role,
@@ -75,8 +78,8 @@ def create_user(
     return user
 
 
-def auth_headers(client: TestClient, email: str) -> dict[str, str]:
-    response = client.post("/auth/login", json={"email": email, "password": "TestPass123!"})
+def auth_headers(client: TestClient, identifier: str) -> dict[str, str]:
+    response = client.post("/auth/login", json={"username": identifier, "password": "TestPass123!"})
     assert response.status_code == 200
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
@@ -115,12 +118,44 @@ def test_login_rate_limit_blocks_excessive_attempts(client: TestClient, db_sessi
     auth_router.login_limiter.window_seconds = 60
     headers = {"X-Forwarded-For": "1.2.3.4"}
 
-    invalid_1 = client.post("/auth/login", headers=headers, json={"email": "manager-rate@test.local", "password": "bad-pass"})
+    invalid_1 = client.post("/auth/login", headers=headers, json={"username": "manager-rate", "password": "bad-pass"})
     assert invalid_1.status_code == 401
-    invalid_2 = client.post("/auth/login", headers=headers, json={"email": "manager-rate@test.local", "password": "bad-pass"})
+    invalid_2 = client.post("/auth/login", headers=headers, json={"username": "manager-rate", "password": "bad-pass"})
     assert invalid_2.status_code == 401
-    blocked = client.post("/auth/login", headers=headers, json={"email": "manager-rate@test.local", "password": "TestPass123!"})
+    blocked = client.post("/auth/login", headers=headers, json={"username": "manager-rate", "password": "TestPass123!"})
     assert blocked.status_code == 429
+
+
+def test_login_accepts_username_as_primary_identifier(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(
+        db_session,
+        "Manager Username",
+        "manager.username@test.local",
+        models.UserRole.MANAGER,
+        school.id,
+        username="manager_username",
+    )
+
+    response = client.post("/auth/login", json={"username": "manager_username", "password": "TestPass123!"})
+    assert response.status_code == 200, response.text
+    assert response.json()["access_token"]
+
+
+def test_login_still_accepts_email_fallback(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(
+        db_session,
+        "Manager Fallback",
+        "manager.fallback@test.local",
+        models.UserRole.MANAGER,
+        school.id,
+        username="manager_fallback",
+    )
+
+    response = client.post("/auth/login", json={"email": "manager.fallback@test.local", "password": "TestPass123!"})
+    assert response.status_code == 200, response.text
+    assert response.json()["access_token"]
 
 
 def test_supervisor_submit_flow_and_instructor_visibility(client: TestClient, db_session: Session):
@@ -213,6 +248,46 @@ def test_create_evaluation_rejects_attribute_not_linked_to_skill(client: TestCli
         },
     )
     assert response.status_code == 400
+
+
+def test_supervisor_create_evaluation_persists_duration_seconds(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Supervisor", "duration.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "duration.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Duration Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Duration Skill")
+    db_session.add(skill)
+    db_session.flush()
+    attr = models.Attribute(school_id=school.id, name="Duration Attribute", description="desc")
+    db_session.add(attr)
+    db_session.flush()
+    db_session.add(models.SkillAttribute(skill_id=skill.id, attribute_id=attr.id))
+    db_session.commit()
+
+    headers = auth_headers(client, "duration.supervisor@test.local")
+    response = client.post(
+        "/supervisor/evaluations",
+        headers=headers,
+        json={
+            "instructor_id": instructor.id,
+            "skill_id": skill.id,
+            "notes": "Timed session",
+            "duration_seconds": 125,
+            "ratings": [
+                {"attribute_id": attr.id, "rating": 4},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["duration_seconds"] == 125
+
+    evaluation = db_session.get(models.Evaluation, payload["id"])
+    assert evaluation is not None
+    assert evaluation.duration_seconds == 125
 
 
 def test_manager_csv_export_returns_data(client: TestClient, db_session: Session):
@@ -348,6 +423,91 @@ def test_instructor_supervisor_filter_and_trends(client: TestClient, db_session:
     payload = filtered.json()
     assert len(payload) == 1
     assert payload[0]["supervisor_id"] == supervisor_a.id
+
+
+def test_instructor_can_acknowledge_their_own_evaluation(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    supervisor = create_user(db_session, "Supervisor", "ack.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "ack.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Ack Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Ack Skill")
+    db_session.add(skill)
+    db_session.flush()
+    evaluation = models.Evaluation(
+        school_id=school.id,
+        instructor_id=instructor.id,
+        supervisor_id=supervisor.id,
+        skill_id=skill.id,
+        final_grade=4,
+        notes="Please review",
+    )
+    db_session.add(evaluation)
+    db_session.commit()
+
+    headers = auth_headers(client, "ack.instructor@test.local")
+    response = client.post(f"/instructor/evaluations/{evaluation.id}/acknowledge", headers=headers)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["instructor_acknowledged_at"] is not None
+
+    db_session.refresh(evaluation)
+    assert evaluation.instructor_acknowledged_at is not None
+
+
+def test_instructor_cannot_acknowledge_another_instructors_evaluation(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    supervisor = create_user(db_session, "Supervisor", "ack2.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    owner = create_user(db_session, "Owner Instructor", "ack2.owner@test.local", models.UserRole.INSTRUCTOR, school.id)
+    other = create_user(db_session, "Other Instructor", "ack2.other@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Ack Restrict Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Ack Restrict Skill")
+    db_session.add(skill)
+    db_session.flush()
+    evaluation = models.Evaluation(
+        school_id=school.id,
+        instructor_id=owner.id,
+        supervisor_id=supervisor.id,
+        skill_id=skill.id,
+        final_grade=3,
+    )
+    db_session.add(evaluation)
+    db_session.commit()
+
+    headers = auth_headers(client, "ack2.other@test.local")
+    response = client.post(f"/instructor/evaluations/{evaluation.id}/acknowledge", headers=headers)
+    assert response.status_code == 403
+
+
+def test_supervisor_cannot_acknowledge_instructor_evaluation(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    supervisor = create_user(db_session, "Supervisor", "ack3.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "ack3.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Ack Role Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Ack Role Skill")
+    db_session.add(skill)
+    db_session.flush()
+    evaluation = models.Evaluation(
+        school_id=school.id,
+        instructor_id=instructor.id,
+        supervisor_id=supervisor.id,
+        skill_id=skill.id,
+        final_grade=5,
+    )
+    db_session.add(evaluation)
+    db_session.commit()
+
+    headers = auth_headers(client, "ack3.supervisor@test.local")
+    response = client.post(f"/instructor/evaluations/{evaluation.id}/acknowledge", headers=headers)
+    assert response.status_code == 403
 
 
 def test_manager_can_manage_skill_attributes(client: TestClient, db_session: Session):
@@ -512,6 +672,7 @@ def test_manager_can_update_user_with_phone(client: TestClient, db_session: Sess
         headers=headers,
         json={
             "full_name": "Coach Updated",
+            "username": "coach_updated",
             "email": "coach.updated@test.local",
             "phone": "555-0102",
             "role": "SUPERVISOR",
@@ -521,10 +682,35 @@ def test_manager_can_update_user_with_phone(client: TestClient, db_session: Sess
     assert response.status_code == 200
     payload = response.json()
     assert payload["full_name"] == "Coach Updated"
+    assert payload["username"] == "coach_updated"
     assert payload["email"] == "coach.updated@test.local"
     assert payload["phone"] == "555-0102"
     assert payload["role"] == "SUPERVISOR"
     assert payload["is_active"] is False
+
+
+def test_manager_can_create_user_with_username(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "manager.create.user@test.local", models.UserRole.MANAGER, school.id)
+
+    headers = auth_headers(client, "manager.create.user")
+    response = client.post(
+        "/manager/users",
+        headers=headers,
+        json={
+            "full_name": "Coach Create",
+            "username": "coach_create",
+            "email": "coach.create@test.local",
+            "phone": "555-0110",
+            "password": "TestPass123!",
+            "role": "INSTRUCTOR",
+            "is_active": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["username"] == "coach_create"
+    assert payload["email"] == "coach.create@test.local"
 
 
 def test_manager_can_delete_user(client: TestClient, db_session: Session):
@@ -540,6 +726,173 @@ def test_manager_can_delete_user(client: TestClient, db_session: Session):
     assert users_response.status_code == 200
     emails = [item["email"] for item in users_response.json()]
     assert "delete.me@test.local" not in emails
+
+
+def test_manager_can_create_update_and_delete_scheduled_evaluation(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Manager", "schedule.manager@test.local", models.UserRole.MANAGER, school.id)
+    supervisor = create_user(db_session, "Supervisor", "schedule.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "schedule.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Schedule Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Schedule Skill")
+    db_session.add(skill)
+    db_session.commit()
+
+    headers = auth_headers(client, "schedule.manager@test.local")
+    created = client.post(
+        "/manager/scheduled-evaluations",
+        headers=headers,
+        json={
+            "instructor_id": instructor.id,
+            "skill_id": skill.id,
+            "target_date": "2026-03-25",
+            "assigned_to_id": supervisor.id,
+            "notes": "First-time eval",
+        },
+    )
+    assert created.status_code == 200, created.text
+    payload = created.json()
+    assert payload["assigned_to_id"] == supervisor.id
+    assert payload["status"] == "PENDING"
+
+    listed = client.get("/manager/scheduled-evaluations", headers=headers)
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+
+    updated = client.put(
+        f"/manager/scheduled-evaluations/{payload['id']}",
+        headers=headers,
+        json={"status": "IN_PROGRESS"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["status"] == "IN_PROGRESS"
+
+    deleted = client.delete(f"/manager/scheduled-evaluations/{payload['id']}", headers=headers)
+    assert deleted.status_code == 204
+
+    relisted = client.get("/manager/scheduled-evaluations", headers=headers)
+    assert relisted.status_code == 200
+    assert relisted.json() == []
+
+
+def test_supervisor_creating_evaluation_from_schedule_marks_schedule_completed(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    supervisor = create_user(db_session, "Supervisor", "scheduled.eval.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "scheduled.eval.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Scheduled Eval Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Scheduled Eval Skill")
+    db_session.add(skill)
+    db_session.flush()
+    attr = models.Attribute(school_id=school.id, name="Scheduled Eval Attribute", description="desc")
+    db_session.add(attr)
+    db_session.flush()
+    db_session.add(models.SkillAttribute(skill_id=skill.id, attribute_id=attr.id))
+    db_session.commit()
+
+    headers = auth_headers(client, "scheduled.eval.supervisor@test.local")
+    scheduled = client.post(
+        "/supervisor/scheduled-evaluations",
+        headers=headers,
+        json={
+            "instructor_id": instructor.id,
+            "skill_id": skill.id,
+            "target_date": "2026-03-25",
+            "notes": "Scheduled first eval",
+        },
+    )
+    assert scheduled.status_code == 200, scheduled.text
+    schedule_id = scheduled.json()["id"]
+
+    created = client.post(
+        "/supervisor/evaluations",
+        headers=headers,
+        json={
+            "instructor_id": instructor.id,
+            "skill_id": skill.id,
+            "scheduled_evaluation_id": schedule_id,
+            "duration_seconds": 90,
+            "ratings": [{"attribute_id": attr.id, "rating": 4}],
+            "notes": "Completed scheduled eval",
+        },
+    )
+    assert created.status_code == 200, created.text
+    created_payload = created.json()
+    assert created_payload["scheduled_evaluation_id"] == schedule_id
+
+    schedule = db_session.get(models.ScheduledEvaluation, schedule_id)
+    assert schedule is not None
+    assert schedule.status == models.ScheduledEvaluationStatus.COMPLETED
+    assert schedule.completed_at is not None
+
+
+def test_supervisor_lists_assigned_and_unassigned_scheduled_evaluations_only_for_school(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    other_school = create_school(db_session, "Other School")
+    supervisor = create_user(db_session, "Supervisor", "schedule.scope.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    other_supervisor = create_user(db_session, "Other Supervisor", "schedule.scope.other@test.local", models.UserRole.SUPERVISOR, school.id)
+    foreign_supervisor = create_user(db_session, "Foreign Supervisor", "schedule.scope.foreign@test.local", models.UserRole.SUPERVISOR, other_school.id)
+    instructor = create_user(db_session, "Instructor", "schedule.scope.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+    other_instructor = create_user(db_session, "Other Instructor", "schedule.scope.instructor2@test.local", models.UserRole.INSTRUCTOR, other_school.id)
+
+    level = models.Level(school_id=school.id, name="Scoped Level")
+    other_level = models.Level(school_id=other_school.id, name="Other Scoped Level")
+    db_session.add_all([level, other_level])
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Scoped Skill")
+    other_skill = models.Skill(level_id=other_level.id, name="Other Scoped Skill")
+    db_session.add_all([skill, other_skill])
+    db_session.flush()
+
+    db_session.add_all(
+        [
+            models.ScheduledEvaluation(
+                school_id=school.id,
+                instructor_id=instructor.id,
+                skill_id=skill.id,
+                target_date=date(2026, 3, 25),
+                requested_by_id=supervisor.id,
+                assigned_to_id=supervisor.id,
+            ),
+            models.ScheduledEvaluation(
+                school_id=school.id,
+                instructor_id=instructor.id,
+                skill_id=skill.id,
+                target_date=date(2026, 3, 26),
+                requested_by_id=supervisor.id,
+                assigned_to_id=None,
+            ),
+            models.ScheduledEvaluation(
+                school_id=school.id,
+                instructor_id=instructor.id,
+                skill_id=skill.id,
+                target_date=date(2026, 3, 27),
+                requested_by_id=supervisor.id,
+                assigned_to_id=other_supervisor.id,
+            ),
+            models.ScheduledEvaluation(
+                school_id=other_school.id,
+                instructor_id=other_instructor.id,
+                skill_id=other_skill.id,
+                target_date=date(2026, 3, 28),
+                requested_by_id=foreign_supervisor.id,
+                assigned_to_id=None,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    headers = auth_headers(client, "schedule.scope.supervisor@test.local")
+    listed = client.get("/supervisor/scheduled-evaluations", headers=headers)
+    assert listed.status_code == 200
+    payload = listed.json()
+    assert len(payload) == 2
+    assert all(item["assigned_to_id"] in {None, supervisor.id} for item in payload)
 
 
 def test_low_grade_evaluation_creates_reevaluation_request(client: TestClient, db_session: Session):
@@ -666,6 +1019,61 @@ def test_follow_up_evaluation_closes_open_reevaluation_request(client: TestClien
         skill_id=skill.id,
         status=models.ReevaluationStatus.OPEN,
     ).count() == 0
+
+    flagged = client.get("/supervisor/evaluations?needs_reevaluation=true", headers=headers)
+    assert flagged.status_code == 200
+    assert flagged.json() == []
+
+
+def test_follow_up_evaluation_with_source_id_clears_previous_reevaluation(client: TestClient, db_session: Session):
+    school = create_school(db_session)
+    create_user(db_session, "Supervisor", "reeval.source.supervisor@test.local", models.UserRole.SUPERVISOR, school.id)
+    instructor = create_user(db_session, "Instructor", "reeval.source.instructor@test.local", models.UserRole.INSTRUCTOR, school.id)
+
+    level = models.Level(school_id=school.id, name="Source Level")
+    db_session.add(level)
+    db_session.flush()
+    skill = models.Skill(level_id=level.id, name="Source Skill")
+    db_session.add(skill)
+    db_session.flush()
+    attr = models.Attribute(school_id=school.id, name="Source Control", description="desc")
+    db_session.add(attr)
+    db_session.flush()
+    db_session.add(models.SkillAttribute(skill_id=skill.id, attribute_id=attr.id))
+    db_session.commit()
+
+    headers = auth_headers(client, "reeval.source.supervisor@test.local")
+    first = client.post(
+        "/supervisor/evaluations",
+        headers=headers,
+        json={
+            "instructor_id": instructor.id,
+            "skill_id": skill.id,
+            "ratings": [{"attribute_id": attr.id, "rating": 2}],
+            "notes": "Needs follow up",
+        },
+    )
+    assert first.status_code == 200, first.text
+    first_id = first.json()["id"]
+
+    second = client.post(
+        "/supervisor/evaluations",
+        headers=headers,
+        json={
+            "instructor_id": instructor.id,
+            "skill_id": skill.id,
+            "source_evaluation_id": first_id,
+            "ratings": [{"attribute_id": attr.id, "rating": 4}],
+            "notes": "Follow-up complete",
+        },
+    )
+    assert second.status_code == 200, second.text
+    second_payload = second.json()
+    assert second_payload["needs_reevaluation"] is False
+
+    first_evaluation = db_session.get(models.Evaluation, first_id)
+    assert first_evaluation is not None
+    assert first_evaluation.needs_reevaluation is False
 
     flagged = client.get("/supervisor/evaluations?needs_reevaluation=true", headers=headers)
     assert flagged.status_code == 200
