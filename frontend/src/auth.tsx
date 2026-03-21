@@ -1,5 +1,14 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { login as apiLogin, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./api";
+import {
+  AUTH_STATE_EVENT,
+  REFRESH_KEY,
+  TOKEN_KEY,
+  USER_KEY,
+  login as apiLogin,
+  logout as apiLogout,
+  me as apiMe,
+  refresh as apiRefresh
+} from "./api";
 import type { User } from "./types";
 
 interface AuthContextValue {
@@ -11,10 +20,6 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-const TOKEN_KEY = "propel_token";
-const REFRESH_KEY = "propel_refresh";
-const USER_KEY = "propel_user";
 
 function readUser(): User | null {
   const raw = localStorage.getItem(USER_KEY);
@@ -78,6 +83,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           })
           .finally(() => setReady(true));
       });
+  }, []);
+
+  useEffect(() => {
+    function onAuthState(event: Event) {
+      const customEvent = event as CustomEvent<
+        | { type: "refreshed"; accessToken: string; refreshToken: string }
+        | { type: "cleared" }
+      >;
+      if (customEvent.detail.type === "refreshed") {
+        setToken(customEvent.detail.accessToken);
+        return;
+      }
+      setToken(null);
+      setUser(null);
+      clearSession();
+    }
+
+    window.addEventListener(AUTH_STATE_EVENT, onAuthState);
+    return () => window.removeEventListener(AUTH_STATE_EVENT, onAuthState);
   }, []);
 
   const value = useMemo<AuthContextValue>(

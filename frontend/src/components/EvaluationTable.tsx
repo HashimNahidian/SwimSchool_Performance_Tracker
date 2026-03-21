@@ -2,7 +2,12 @@ import type { EvaluationSummary } from "../types";
 import { formatDurationSeconds } from "./EvaluationTimer";
 
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
+  return new Date(iso).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "2-digit",
+  });
 }
 
 const ACTION_BUTTON_STYLE = {

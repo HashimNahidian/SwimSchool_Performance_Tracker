@@ -4,6 +4,7 @@ import { useAuth } from "../../auth";
 import {
   completeSupervisorReevaluation,
   createSupervisorEvaluation,
+  deleteSupervisorEvaluation,
   getSupervisorEvaluationDetail,
   listSupervisorEvaluations,
   listSupervisorInstructors,
@@ -158,6 +159,20 @@ export function useSupervisorData() {
     }
   }
 
+  async function handleDeleteEvaluation(id: number) {
+    if (!token) return;
+    if (!window.confirm("Delete this evaluation?")) return;
+    try {
+      await deleteSupervisorEvaluation(token, id);
+      setEvaluations((prev) => prev.filter((item) => item.id !== id));
+      setReportEval((prev) => (prev?.id === id ? null : prev));
+      setEditEval((prev) => (prev?.id === id ? null : prev));
+      refreshData();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   function handleSaved(updated: EvaluationDetail) {
     setEvaluations((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
     refreshData();
@@ -269,6 +284,7 @@ export function useSupervisorData() {
     refreshData,
     openDetail,
     handleCompleteReevaluation,
+    handleDeleteEvaluation,
     handleSaved,
     handleCreated,
   };

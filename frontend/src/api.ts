@@ -10,9 +10,76 @@ import type {
   User
 } from "./types";
 
+export const TOKEN_KEY = "propel_token";
+export const REFRESH_KEY = "propel_refresh";
+export const USER_KEY = "propel_user";
+export const AUTH_STATE_EVENT = "propel-auth-state";
+
 const API_BASE_URL = (
   import.meta.env.DEV ? "" : import.meta.env.VITE_API_BASE_URL ?? ""
 ).replace(/\/$/, "");
+
+type AuthStateDetail =
+  | { type: "refreshed"; accessToken: string; refreshToken: string }
+  | { type: "cleared" };
+
+function emitAuthState(detail: AuthStateDetail) {
+  window.dispatchEvent(new CustomEvent<AuthStateDetail>(AUTH_STATE_EVENT, { detail }));
+}
+
+function clearStoredSession() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+  localStorage.removeItem(USER_KEY);
+  emitAuthState({ type: "cleared" });
+}
+
+async function fetchWithAuth(
+  path: string,
+  method: string,
+  body?: unknown,
+  token?: string
+): Promise<Response> {
+  return fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = localStorage.getItem(REFRESH_KEY);
+  if (!refreshToken) {
+    clearStoredSession();
+    return null;
+  }
+
+  let response: Response;
+  try {
+    response = await fetchWithAuth("/auth/refresh", "POST", { refresh_token: refreshToken });
+  } catch {
+    clearStoredSession();
+    return null;
+  }
+
+  if (!response.ok) {
+    clearStoredSession();
+    return null;
+  }
+
+  const payload = (await response.json()) as TokenResponse;
+  localStorage.setItem(TOKEN_KEY, payload.access_token);
+  localStorage.setItem(REFRESH_KEY, payload.refresh_token);
+  emitAuthState({
+    type: "refreshed",
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token
+  });
+  return payload.access_token;
+}
 
 async function request<T>(
   path: string,
@@ -22,18 +89,18 @@ async function request<T>(
 ): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
-      },
-      body: body ? JSON.stringify(body) : undefined
-    });
+    response = await fetchWithAuth(path, method, body, token);
   } catch {
     throw new Error(
       "Unable to reach the server. Check that the API is running and that the frontend API URL is configured correctly."
     );
+  }
+
+  if (response.status === 401 && token && !path.startsWith("/auth/")) {
+    const refreshedToken = await refreshAccessToken();
+    if (refreshedToken) {
+      response = await fetchWithAuth(path, method, body, refreshedToken);
+    }
   }
 
   if (!response.ok) {
@@ -317,6 +384,10 @@ export function updateSupervisorEvaluation(
   }
 ): Promise<EvaluationDetail> {
   return request(`/supervisor/evaluations/${id}`, "PUT", payload, token);
+}
+
+export function deleteSupervisorEvaluation(token: string, id: number): Promise<void> {
+  return request(`/supervisor/evaluations/${id}`, "DELETE", undefined, token);
 }
 
 export function getManagerEvaluationDetail(token: string, id: number): Promise<EvaluationDetail> {

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dotenv import load_dotenv
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 import models
 from db import SessionLocal
@@ -24,7 +24,10 @@ def get_or_create_user(
     user = db.scalar(
         select(models.User).where(
             models.User.school_id == school_id,
-            models.User.username == normalized_username,
+            or_(
+                models.User.username == normalized_username,
+                models.User.email == normalized_email,
+            ),
         )
     )
     if user:

@@ -28,6 +28,7 @@ export function SupervisorEvaluationsPage() {
     filteredRows,
     filteredAssignedEvaluations,
     openDetail,
+    handleDeleteEvaluation,
     handleSaved,
     handleCreated,
   } = useSupervisorData();
@@ -166,6 +167,7 @@ export function SupervisorEvaluationsPage() {
           rows={filteredRows}
           onView={(id) => openDetail(id, "view")}
           onEdit={(id) => openDetail(id, "edit")}
+          onDelete={handleDeleteEvaluation}
           onReevaluate={handleReevaluate}
         />
         {filteredRows.length === 0 && (

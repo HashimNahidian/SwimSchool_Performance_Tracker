@@ -298,6 +298,25 @@ def update_evaluation(
     return evaluation_detail_row(full)
 
 
+@router.delete("/evaluations/{evaluation_id}", status_code=204, dependencies=[supervisor_guard])
+def delete_evaluation(
+    evaluation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPERVISOR)),
+) -> None:
+    evaluation = db.scalar(
+        select(Evaluation).where(
+            Evaluation.id == evaluation_id,
+            Evaluation.school_id == current_user.school_id,
+            Evaluation.supervisor_id == current_user.id,
+        )
+    )
+    if not evaluation:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    db.delete(evaluation)
+    db.commit()
+
+
 @router.get("/reevaluations", response_model=list[ReevaluationRequestOut], dependencies=[supervisor_guard])
 def list_reevaluations(
     instructor_id: int | None = None,
